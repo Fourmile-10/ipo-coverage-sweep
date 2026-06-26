@@ -34,13 +34,20 @@ def _coverage_notes(log: RunLog, priced, filed) -> list[str]:
     for s in log.sources:
         notes.append(f"{s.name}: {'ok' if s.ok else 'ERROR'}, {s.count} rows"
                      + (f" ({s.note})" if s.note else ""))
-    no424 = [i.ticker for i in priced.ipos if "no-EDGAR-424B4" in i.flags]
-    if no424:
-        notes.append("Priced names confirmed via the IPO calendar with no EDGAR "
-                     "424B4 (kept, not dropped): " + ", ".join(no424) + ".")
-    notes.append("Leadership/founder detail is not in the calendar or enrichment "
-                 "sources; deep profiles point to the prospectus rather than name "
-                 "a founder unverified.")
+    notes.append("Section A figures are read from each company's EDGAR prospectus "
+                 "(form noted per card). Extraction is heuristic; figures that did "
+                 "not trace cleanly to the filing are shown as 'not disclosed in "
+                 "prospectus' and implausible raises/valuations are withheld.")
+    withheld = [i.ticker for i in priced.ipos
+                if "raise-withheld" in i.flags or "valuation-withheld" in i.flags]
+    if withheld:
+        notes.append("Figures withheld as implausible (likely a parse artifact): "
+                     + ", ".join(withheld) + ".")
+    nopros = [i.ticker for i in priced.ipos if "no-prospectus" in i.flags]
+    if nopros:
+        notes.append("No EDGAR prospectus resolved for: " + ", ".join(nopros) + ".")
+    notes.append("Foreign (F-1) issuers are covered lightly: US$ equivalents are "
+                 "used only where the filing states them, never local currency.")
     notes.append("Section B resale-only screening is name and reporting-history "
                  "based; a pure secondary registration that clears those checks "
                  "may still appear. Offering sizes are read from the fee exhibit "
@@ -67,6 +74,7 @@ def run(args) -> int:
 
     log = RunLog(window_start, window_end)
     channel = args.channel or config.SLACK_CHANNEL_ID
+    prefix = f"*{args.note}*\n\n" if args.note else ""
 
     # --- Pull both spines (fail loud) ---
     priced = pipeline.build_section_a(window_start, window_end, log)
@@ -80,7 +88,7 @@ def run(args) -> int:
 
     # Verified-good but genuinely empty: one line only.
     if is_empty and log.all_sources_ok:
-        line = content.empty_line(window_start, window_end)
+        line = prefix + content.empty_line(window_start, window_end)
         print(line)
         if not args.dry_run:
             slack_post.post_text(line, channel)
@@ -92,10 +100,8 @@ def run(args) -> int:
     pdf_ok = False
     pdf_path = str(Path(__file__).with_name(f"IPO_Sweep_{run_date.isoformat()}.pdf"))
     audit = content.self_audit_footer(
-        window_start, window_end, flags,
-        filings_ok=log.all_sources_ok,
-        priced_fallback=any("cap-fallback" in i.flags for i in priced.ipos),
-        pdf_ok=True,
+        window_start, window_end, flags, log.counts,
+        filings_ok=log.all_sources_ok, pdf_ok=True,
     )
     if not args.no_pdf:
         try:
@@ -108,17 +114,12 @@ def run(args) -> int:
             log.error(f"PDF render failed: {exc}")
             traceback.print_exc()
     audit = content.self_audit_footer(
-        window_start, window_end, flags,
-        filings_ok=log.all_sources_ok,
-        priced_fallback=any("cap-fallback" in i.flags for i in priced.ipos),
-        pdf_ok=pdf_ok,
+        window_start, window_end, flags, log.counts,
+        filings_ok=log.all_sources_ok, pdf_ok=pdf_ok,
     )
 
     if args.dry_run:
-        print(header)
-        print(content.slack_section_a_summary(priced))
-        print(content.slack_section_b_standouts(filed))
-        print(audit)
+        print(prefix + content.slack_message(window_start, window_end, priced, filed))
         print(f"\nPDF: {log.pdf_status} -> {pdf_path if pdf_ok else '(none)'}")
         print("\n--- run log ---")
         print(log.dump())
@@ -126,12 +127,12 @@ def run(args) -> int:
 
     # --- Slack (the alert always fires) ---
     if pdf_ok:
-        body = (content.slack_section_a_summary(priced) + "\n\n"
-                + content.slack_section_b_standouts(filed))
-        slack_post.post_with_pdf(pdf_path, header, body, audit, channel, run_date.isoformat())
+        msg = prefix + content.slack_message(window_start, window_end, priced, filed)
+        slack_post.post_with_pdf(pdf_path, msg, channel, run_date.isoformat())
         log.slack_status = "posted with PDF"
     else:
-        parts = [header, "", content.slack_section_a_summary(priced)]
+        # Degraded path: no PDF, so the detail goes into the message as text.
+        parts = [prefix + header, "", content.slack_section_a_summary(priced)]
         for ipo in priced.profiled:
             parts += ["", content.profile_text(ipo)]
         parts += ["", content.section_b_text(filed), "",
@@ -163,6 +164,8 @@ def main() -> int:
                    help="Pin the window end date YYYY-MM-DD (default: today, Sydney).")
     p.add_argument("--channel", default=None,
                    help="Override Slack channel/DM ID (default: SLACK_CHANNEL_ID).")
+    p.add_argument("--note", default=None,
+                   help="Prepend a bold note line to the Slack post (e.g. a test banner).")
     args = p.parse_args()
 
     try:

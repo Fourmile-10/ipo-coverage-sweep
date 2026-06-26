@@ -31,16 +31,14 @@ def _retry(fn):
         return fn()  # second failure propagates to the caller
 
 
-def post_with_pdf(pdf_path: str, header: str, body: str, footer: str,
-                  channel: str, run_date_iso: str) -> None:
+def post_with_pdf(pdf_path: str, text: str, channel: str, run_date_iso: str) -> None:
     client = _client()
-    comment = f"{header}\n\n{body}\n\n{footer}"
     _retry(lambda: client.files_upload_v2(
         channel=channel,
         file=pdf_path,
         filename=f"IPO_Sweep_{run_date_iso}.pdf",
         title=f"IPO Coverage Sweep {run_date_iso}",
-        initial_comment=comment,
+        initial_comment=text,
     ))
 
 

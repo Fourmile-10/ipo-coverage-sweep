@@ -80,6 +80,8 @@ class PricedIPO:
     description: str = ""
     enriched: bool = False
     flags: list[str] = field(default_factory=list)
+    profile: object = None   # prospectus.Profile, attached in the pipeline
+    lane: str = ""           # "in-lane" / "out-of-lane"
 
 
 # --- Number parsing --------------------------------------------------------

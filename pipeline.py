@@ -14,6 +14,7 @@ from datetime import date
 import classify
 import config
 import edgar_source as edgar
+import prospectus as prospectus
 import sa_source as sa
 from runlog import RunLog
 
@@ -26,14 +27,9 @@ class PricedResult:
 
 
 def _on_profile(ipo: sa.PricedIPO) -> bool:
-    hay = " ".join([ipo.name, ipo.sector, ipo.industry, ipo.description]).lower()
+    biz = getattr(ipo.profile, "business", "") if ipo.profile else ""
+    hay = " ".join([ipo.name, ipo.sector, ipo.industry, ipo.description, biz]).lower()
     return any(h in hay for h in config.ON_PROFILE_HINTS)
-
-
-def _is_thin_float(ipo: sa.PricedIPO) -> bool:
-    # Tiny revenue pumped to a large nominal cap.
-    return (ipo.revenue is not None and ipo.revenue < 5_000_000
-            and ipo.market_cap is not None and ipo.market_cap > 500_000_000)
 
 
 def build_section_a(window_start: date, window_end: date, log: RunLog) -> PricedResult:
@@ -48,7 +44,7 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
 
     kept: list[sa.PricedIPO] = []
     for ipo in candidates:
-        sa.enrich(ipo)
+        sa.enrich(ipo)                       # sector/exchange for lane + fallback
 
         # Some SPACs only reveal themselves in the prospectus language (e.g.
         # "Wilco 63 Corporation", a blank-check by description). Drop those now
@@ -56,49 +52,34 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
         if classify.is_spac(ipo.name, text=ipo.description, sic=ipo.industry):
             continue
 
-        # 424B4 confirmation only (never an enumerator). SpaceX has none.
-        try:
-            has = edgar.has_recent_424b4(ipo.ticker)
-        except Exception:
-            has = None
-        if has is False or has is None:
-            ipo.flags.append("no-EDGAR-424B4")
+        # The prospectus on EDGAR is the source for everything printed.
+        prof = prospectus.build_profile(ipo.ticker, ipo.name, ipo.ipo_price,
+                                        fy_max=window_end.year)
+        ipo.profile = prof
+        if not prof.resolved:
+            ipo.flags.append("no-prospectus")
 
-        # Size gate: deal size is rarely exposed by the calendar, so we gate on
-        # current market cap (>$100M) and flag the fallback, per spec.
-        if ipo.market_cap is not None:
-            ipo.flags.append("cap-fallback")
-            if ipo.market_cap < config.MIN_DEAL_SIZE:
-                continue  # below the $100M line, drop from the sweep
+        # Size gate from the filing: keep if the raise OR the implied valuation
+        # clears $100M (a small raise on a >$100M company still counts). No
+        # scraped market cap. When neither is known, keep and flag.
+        size = max(prof.gross_proceeds or 0, prof.impl_valuation or 0)
+        if size >= config.MIN_DEAL_SIZE:
+            pass                                  # clears the line, keep
+        elif prof.foreign or size == 0:
+            ipo.flags.append("size-unverified")   # keep; foreign val not computed, or nothing known
         else:
-            ipo.flags.append("size-unverified")  # keep, cannot confirm >$100M
+            continue                              # genuinely small domestic deal, drop
 
-        if _is_thin_float(ipo):
-            ipo.flags.append("thin-float")
+        ipo.lane = "in-lane" if _on_profile(ipo) else "out-of-lane"
+        ipo.flags.extend(prof.flags)
         kept.append(ipo)
 
-    profiled = _select_profiles(kept)
     log.counts["priced_over_100m"] = len(kept)
-    log.counts["priced_profiled"] = len(profiled)
-    return PricedResult(ipos=kept, profiled=profiled)
-
-
-def _select_profiles(kept: list[sa.PricedIPO]) -> list[sa.PricedIPO]:
-    profiled = []
-    for ipo in kept:
-        if "thin-float" in ipo.flags:
-            continue  # never deep-profile thin-float runners
-        big = ipo.market_cap is not None and ipo.market_cap > config.TIER_B_CAP
-        on_lane = _on_profile(ipo)
-        if big and not on_lane:
-            ipo.flags.append("out-of-lane")
-            profiled.append(ipo)
-        elif big and on_lane:
-            profiled.append(ipo)
-        elif (not big) and on_lane:
-            ipo.flags.append("sub-$400M, on-profile")
-            profiled.append(ipo)
-    return profiled
+    log.counts["priced_profiled"] = len(kept)   # every priced name now gets a card
+    log.counts["priced_via_424b4"] = sum(1 for i in kept if (i.profile.source_form or "").startswith("424"))
+    log.counts["priced_via_s1"] = sum(1 for i in kept if (i.profile.source_form or "").startswith("S-1"))
+    log.counts["priced_via_f1"] = sum(1 for i in kept if (i.profile.source_form or "").startswith("F-1"))
+    return PricedResult(ipos=kept, profiled=kept)
 
 
 # --- Section B -------------------------------------------------------------
@@ -140,6 +121,13 @@ def build_section_b(window_start: date, window_end: date, log: RunLog) -> FiledR
             continue
 
         foreign_flag, country = edgar.tag_domestic_or_foreign(f.form, sub)
+        # XBRL first (rare for first-time filers); fall back to scraping the
+        # revenue line out of the S-1/F-1 itself, which is where these issuers'
+        # numbers actually live.
+        rev = edgar.latest_annual_revenue(cik)
+        if rev == "n/d":
+            rev = prospectus.revenue_label_for(cik, f.filename, f.form,
+                                               foreign_flag, window_end.year)
         filer = edgar.Filer(
             cik=cik,
             company=sub.get("name") or f.company,
@@ -149,7 +137,7 @@ def build_section_b(window_start: date, window_end: date, log: RunLog) -> FiledR
             foreign=foreign_flag,
             country=country,
             business=edgar.business_clause(sub),
-            revenue_label=edgar.latest_annual_revenue(cik),
+            revenue_label=rev,
             offering_label=edgar.offering_size(cik, f.filename),
         )
         (foreign if foreign_flag else domestic).append(filer)
@@ -171,8 +159,9 @@ def tally_flags(priced: PricedResult) -> dict:
     def count(tag):
         return sum(1 for i in priced.ipos if tag in i.flags)
     return {
-        "thin-float": count("thin-float"),
-        "cap-fallback": count("cap-fallback"),
-        "out-of-lane": sum(1 for i in priced.profiled if "out-of-lane" in i.flags),
-        "no-EDGAR-424B4": count("no-EDGAR-424B4"),
+        "out-of-lane": sum(1 for i in priced.ipos if i.lane == "out-of-lane"),
+        "raise-withheld": count("raise-withheld"),
+        "valuation-withheld": count("valuation-withheld"),
+        "size-unverified": count("size-unverified"),
+        "no-prospectus": count("no-prospectus"),
     }

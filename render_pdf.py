@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from xml.sax.saxutils import escape as _xml_escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
@@ -44,6 +45,11 @@ for _name, _bold, _paths in (
             except Exception:
                 pass
             break
+
+
+def _e(text) -> str:
+    """Escape dynamic text so reportlab's mini-XML parser does not choke on & < >."""
+    return _xml_escape(str(text)) if text is not None else ""
 
 
 def _styles():
@@ -109,16 +115,16 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
         story.append(Paragraph("Nothing priced >$100M this window.", st["body"]))
     else:
         for ipo in priced.ipos:
-            story.append(Paragraph("- " + content.priced_one_liner(ipo), st["body"]))
-        for ipo in priced.profiled:
-            prof = content.priced_profile(ipo)
-            story.append(Paragraph(prof["name"], st["h2"]))
-            story.append(Paragraph(prof["summary"], st["body"]))
-            story.append(Spacer(1, 4))
-            story.append(_stat_grid(prof["stat_block"], st))
-            story.append(Spacer(1, 4))
-            for b in prof["bullets"]:
-                story.append(Paragraph("- " + b, st["body"]))
+            c = content.priced_card(ipo)
+            story.append(Paragraph(_e(c["header"]), st["h2"]))
+            for label, key, style in (("What it does", "business", "body"),
+                                      ("Leadership", "leadership", "body"),
+                                      ("Financials", "financials", "body"),
+                                      ("Backers", "backers", "body"),
+                                      ("Lane", "lane", "body"),
+                                      ("Source", "source", "small")):
+                story.append(Paragraph(f"<b>{label}:</b> {_e(c[key])}", st[style]))
+            story.append(Spacer(1, 8))
 
     # --- Section B ---
     story.append(Paragraph("Section B. Newly filed (in registration)", st["h1"]))
@@ -128,7 +134,7 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
 
     # --- Coverage notes ---
     story.append(Paragraph("Coverage notes", st["h2"]))
-    note_rows = [[Paragraph("- " + n, st["cell"])] for n in coverage_notes] or [[Paragraph("None.", st["cell"])]]
+    note_rows = [[Paragraph("- " + _e(n), st["cell"])] for n in coverage_notes] or [[Paragraph("None.", st["cell"])]]
     box = Table(note_rows, colWidths=[doc.width])
     box.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), LIGHT),
@@ -147,32 +153,11 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
     return path
 
 
-def _stat_grid(stat_block, st):
-    cells, row = [], []
-    for label, value in stat_block:
-        row.append(Paragraph(f"<b>{label}</b><br/>{value}", st["cell"]))
-        if len(row) == 2:
-            cells.append(row)
-            row = []
-    if row:
-        row.append(Paragraph("", st["cell"]))
-        cells.append(row)
-    t = Table(cells, colWidths=[3.4 * inch, 3.4 * inch])
-    t.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.4, LIGHT),
-        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    return t
-
-
 def _filer_table(title, filers, st):
     head = [Paragraph(c, st["cellh"]) for c in content.SECTION_B_COLUMNS]
     rows = [head]
     for f in filers:
-        rows.append([Paragraph(str(c), st["cell"]) for c in content.filer_row(f)])
+        rows.append([Paragraph(_e(c), st["cell"]) for c in content.filer_row(f)])
     if len(rows) == 1:
         rows.append([Paragraph("None this window.", st["cell"])]
                     + [Paragraph("", st["cell"]) for _ in range(5)])

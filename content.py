@@ -7,6 +7,7 @@ not in the calendar/enrichment sources we say so and point to the prospectus.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import sa_source as sa
@@ -18,76 +19,95 @@ def window_str(start: date, end: date) -> str:
     return f"{start.strftime('%d %b %Y')} to {end.strftime('%d %b %Y')}"
 
 
-def _flags(ipo: sa.PricedIPO) -> str:
-    return f" [{', '.join(ipo.flags)}]" if ipo.flags else ""
+NOT_DISCLOSED = "not disclosed in prospectus"
 
 
-def _price(ipo: sa.PricedIPO) -> str:
-    return f"${ipo.ipo_price:g}" if ipo.ipo_price is not None else "price not disclosed"
+def _m(v) -> str:
+    if v is None:
+        return "n/d"
+    a = abs(v)
+    if a >= 1e9:
+        return f"${v / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"${v / 1e6:.1f}M"
+    return f"${v:,.0f}"
+
+
+def _price_s(ipo: sa.PricedIPO) -> str:
+    return f"${ipo.ipo_price:g}" if ipo.ipo_price is not None else "n/d"
 
 
 def _exch(ipo: sa.PricedIPO) -> str:
-    return ipo.exchange or "EXCH n/d"
+    p = ipo.profile
+    return (p.exchange if p and p.exchange else (ipo.exchange or "EXCH n/d"))
 
 
-def _clause(ipo: sa.PricedIPO) -> str:
-    desc = ipo.description or ""
-    if not desc:
-        return ipo.industry or "business not disclosed"
-    # First sentence, trimmed.
-    clause = desc.split(". ")[0].strip()
-    return (clause[:160] + "...") if len(clause) > 160 else clause
+# --- Section A: per-company card -------------------------------------------
+def priced_header(ipo: sa.PricedIPO) -> str:
+    p = ipo.profile
+    return (f"{short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker}) — priced "
+            f"{ipo.ipo_date} at {_price_s(ipo)}; raise {_m(p and p.gross_proceeds)}; "
+            f"impl. val {_m(p and p.impl_valuation)}")
 
 
-# --- Section A: one-liners --------------------------------------------------
-def priced_one_liner(ipo: sa.PricedIPO) -> str:
-    sector = ipo.sector or ipo.industry or "sector n/d"
-    cap = ipo.market_cap_label if ipo.market_cap is not None else "not retrieved"
-    return (
-        f"{ipo.name} ({_exch(ipo)}: {ipo.ticker}), {sector}, "
-        f"priced {ipo.ipo_date} at {_price(ipo)}, raise not disclosed, "
-        f"mkt cap ~{cap}, {_clause(ipo)}{_flags(ipo)}"
-    )
+def _leadership_line(p) -> str:
+    if not p or not p.ceo_name:
+        return f"CEO {NOT_DISCLOSED}"
+    parts = [f"CEO {p.ceo_name}"]
+    if p.is_founder is True:
+        parts.append("founder" + (f" ({p.founder_year})" if p.founder_year else ""))
+    elif p.is_founder is False:
+        parts.append("not founder-led")
+    elif p.founder_year:
+        parts.append(f"founded {p.founder_year}")
+    else:
+        parts.append("founder n/d")
+    if p.ceo_credential:
+        parts.append(p.ceo_credential)
+    return "; ".join(parts)
 
 
-# --- Section A: deep profile ------------------------------------------------
-def priced_profile(ipo: sa.PricedIPO) -> dict:
-    cap = ipo.market_cap_label if ipo.market_cap is not None else "not retrieved"
-    rev = ipo.revenue_label if ipo.revenue is not None else "not retrieved"
-    rev_kind = "net revenue" if "crypto" in (_clause(ipo).lower()) else "revenue"
-    ni = ipo.net_income_label if ipo.net_income is not None else "not retrieved"
-    margin = "not disclosed"
-    if ipo.net_income is not None and ipo.revenue:
-        margin = f"{(ipo.net_income / ipo.revenue) * 100:+.0f}% net margin"
+def _financials_line(p) -> str:
+    if not p:
+        return NOT_DISCLOSED
+    bits = []
+    if p.pre_revenue and p.revenue is None:
+        bits.append("pre-revenue")
+    elif p.revenue is not None:
+        seg = f"{p.revenue_kind} {_m(p.revenue)}"
+        if p.revenue_period:
+            seg += f" ({p.revenue_period})"
+        if p.yoy_growth is not None:
+            seg += f", {p.yoy_growth:+.0f}% YoY"
+        bits.append(seg)
+    else:
+        bits.append(f"revenue {NOT_DISCLOSED}")
+    if p.gross_margin is not None:
+        bits.append(f"gross margin {p.gross_margin:.0f}%")
+    if p.net_income is not None:
+        seg = f"net income {_m(p.net_income)}"
+        if p.net_margin is not None:
+            seg += f" ({p.net_margin:+.0f}% margin)"
+        bits.append(seg)
+    if p.employees:
+        bits.append(f"{p.employees} employees")
+    return "; ".join(bits)
 
-    summary = (
-        f"{ipo.name} ({_exch(ipo)}: {ipo.ticker}) priced on {ipo.ipo_date} at "
-        f"{_price(ipo)}. Leadership and founder detail were not retrieved from "
-        f"the IPO calendar or enrichment sources; see the prospectus for the CEO "
-        f"and whether they are the founder. What it does: {_clause(ipo)}."
-    )
-    stat_block = [
-        ("IPO date / exchange", f"{ipo.ipo_date} / {_exch(ipo)}"),
-        ("Price vs range", f"{_price(ipo)} (range not disclosed)"),
-        ("Raise", "not disclosed"),
-        ("Valuation at IPO", "not disclosed"),
-        ("Current mkt cap", cap),
-        (f"TTM {rev_kind}", rev),
-        ("Net income / margin", f"{ni} ({margin})"),
-        ("Employees", ipo.employees or "not disclosed"),
-    ]
-    bullets = [
-        f"Sector / industry: {ipo.sector or 'n/d'} / {ipo.industry or 'n/d'}.",
-        f"Pre-IPO investors and IPO mechanics: not disclosed in sources; see prospectus.",
-    ]
-    if "out-of-lane" in ipo.flags:
-        bullets.append("Lane note: caught by size (>$400M cap), out of Glenn's "
-                       "core lane on the business description.")
-    if "sub-$400M, on-profile" in ipo.flags:
-        bullets.append("Lane note: below $400M cap but on-profile for Glenn's lane.")
-    bullets.append(f"Close on current TTM {rev_kind}: {rev}.")
-    return {"name": ipo.name, "summary": summary, "stat_block": stat_block,
-            "bullets": bullets}
+
+def priced_card(ipo: sa.PricedIPO) -> dict:
+    p = ipo.profile
+    why = ("fits Glenn's lane (vertical SaaS / fintech / proptech / adjacency)"
+           if ipo.lane == "in-lane" else "outside the core lane on the business")
+    src = f"{p.source_form} {p.accession}" if (p and p.resolved) else "no EDGAR prospectus found"
+    return {
+        "header": priced_header(ipo),
+        "business": (p.business if (p and p.business) else NOT_DISCLOSED),
+        "leadership": _leadership_line(p),
+        "financials": _financials_line(p),
+        "backers": (", ".join(p.backers) if (p and p.backers) else NOT_DISCLOSED),
+        "lane": f"{ipo.lane}, {why}",
+        "source": src,
+    }
 
 
 # --- Section B rows ---------------------------------------------------------
@@ -107,6 +127,58 @@ SECTION_B_COLUMNS = ["Company", "Filed", "Country", "Business", "Revenue (FY)",
 
 
 # --- Slack assembly ---------------------------------------------------------
+_LEGAL_SUFFIXES = (
+    ", Incorporated", " Incorporated", ", Inc.", " Inc.", ", Inc", " Inc",
+    ", Corporation", " Corporation", ", Corp.", " Corp.", ", Corp", " Corp",
+    ", Company", " Company", ", Ltd.", " Ltd.", ", Ltd", " Ltd",
+    ", LLC", " LLC", ", L.P.", " L.P.", " PLC", " plc",
+)
+_EDGAR_STATE_TAG = re.compile(r"\s*/[A-Z]{2}/\s*$")  # EDGAR's "FOO BANCORP /IA/"
+
+
+def short_name(name: str) -> str:
+    """Trim trailing legal suffixes for a cleaner Slack read (PDF keeps full)."""
+    n = _EDGAR_STATE_TAG.sub("", (name or "").strip())
+    changed = True
+    while changed:
+        changed = False
+        for suf in _LEGAL_SUFFIXES:
+            if n.endswith(suf):
+                n = n[: -len(suf)].rstrip(" ,")
+                changed = True
+    return n or (name or "")
+
+
+def slack_priced_line(ipo: sa.PricedIPO) -> str:
+    p = ipo.profile
+    sector = ipo.sector or ipo.industry or "n/d"
+    return (f"• {short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker}) — {sector}, "
+            f"{_price_s(ipo)}, raise {_m(p and p.gross_proceeds)}, "
+            f"impl. val {_m(p and p.impl_valuation)} [{ipo.lane}]")
+
+
+def slack_message(start: date, end: date, priced: PricedResult, filed: FiledResult) -> str:
+    """The clean digest that rides with the PDF. Detail lives in the PDF."""
+    n_filed = len(filed.domestic) + len(filed.foreign)
+    lines = [
+        f"*IPO sweep · {window_str(start, end)}*",
+        f"{len(priced.ipos)} priced >$100M · {n_filed} filed "
+        f"({len(filed.domestic)} US, {len(filed.foreign)} foreign)",
+    ]
+    if priced.ipos:
+        lines += ["", "*Priced*"]
+        lines += [slack_priced_line(i) for i in priced.ipos]
+    lines += ["", "*Filed*"]
+    if filed.domestic:
+        lines.append("US: " + ", ".join(short_name(f.company) for f in filed.domestic))
+    if filed.foreign:
+        lines.append("Foreign: " + ", ".join(short_name(f.company) for f in filed.foreign))
+    if not filed.domestic and not filed.foreign:
+        lines.append("None this window.")
+    lines += ["", "_Full detail in the attached PDF._"]
+    return "\n".join(lines)
+
+
 def slack_header(start: date, end: date, priced: PricedResult, filed: FiledResult) -> str:
     return (
         f"IPO sweep, {window_str(start, end)}: "
@@ -120,7 +192,7 @@ def slack_section_a_summary(priced: PricedResult) -> str:
     if not priced.ipos:
         return "Section A: nothing priced >$100M this window."
     lines = ["*Section A, priced this window:*"]
-    lines += [f"- {priced_one_liner(i)}" for i in priced.ipos]
+    lines += [slack_priced_line(i) for i in priced.ipos]
     return "\n".join(lines)
 
 
@@ -138,13 +210,17 @@ def slack_section_b_standouts(filed: FiledResult) -> str:
 
 
 def profile_text(ipo: sa.PricedIPO) -> str:
-    """Plain-text deep profile for the PDF-failure fallback path."""
-    prof = priced_profile(ipo)
-    lines = [f"*{prof['name']}*", prof["summary"], ""]
-    lines += [f"  {label}: {value}" for label, value in prof["stat_block"]]
-    lines.append("")
-    lines += [f"  - {b}" for b in prof["bullets"]]
-    return "\n".join(lines)
+    """Plain-text card for the PDF-failure fallback path."""
+    c = priced_card(ipo)
+    return "\n".join([
+        f"*{c['header']}*",
+        f"  What it does: {c['business']}",
+        f"  Leadership: {c['leadership']}",
+        f"  Financials: {c['financials']}",
+        f"  Backers: {c['backers']}",
+        f"  Lane: {c['lane']}",
+        f"  Source: {c['source']}",
+    ])
 
 
 def section_b_text(filed: FiledResult) -> str:
@@ -160,15 +236,16 @@ def section_b_text(filed: FiledResult) -> str:
         block("Newly filed, foreign (F-1)", filed.foreign)
 
 
-def self_audit_footer(start: date, end: date, flags: dict,
-                      filings_ok: bool, priced_fallback: bool, pdf_ok: bool) -> str:
+def self_audit_footer(start: date, end: date, flags: dict, counts: dict,
+                      filings_ok: bool, pdf_ok: bool) -> str:
     next_sweep = (end + timedelta(days=14)).strftime("%d %b %Y")
     return (
-        f"Next sweep: {next_sweep}. Sources: IPO calendar + EDGAR (index files, "
-        f"424B4, submissions). Filings status: {'ok' if filings_ok else 'inconclusive'}. "
-        f"Priced status: {'fallback-used' if priced_fallback else 'ok'}. "
-        f"Flags: {flags['thin-float']} thin-float, {flags['cap-fallback']} cap-fallback, "
-        f"{flags['out-of-lane']} out-of-lane profiled, {flags['no-EDGAR-424B4']} no-EDGAR-424B4. "
+        f"Next sweep: {next_sweep}. Sources: IPO calendar + EDGAR prospectus "
+        f"({counts.get('priced_via_424b4', 0)} via 424B4, {counts.get('priced_via_s1', 0)} via S-1/A, "
+        f"{counts.get('priced_via_f1', 0)} via F-1) + EDGAR index files. "
+        f"Filings status: {'ok' if filings_ok else 'inconclusive'}. "
+        f"Flags: {flags['out-of-lane']} out-of-lane, {flags['raise-withheld']} raise-withheld, "
+        f"{flags['valuation-withheld']} valuation-withheld, {flags['size-unverified']} size-unverified. "
         f"PDF: {'attached' if pdf_ok else 'failed'}."
     )
 

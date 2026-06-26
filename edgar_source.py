@@ -182,6 +182,112 @@ def latest_annual_revenue(cik: str) -> str:
     return "n/d"
 
 
+# --- Revenue scraped from the prospectus document -------------------------
+# Genuine first-time IPO filers almost never have XBRL financial facts yet
+# (companyfacts returns 0 us-gaap concepts), so the only place their revenue
+# lives is the S-1/F-1 prospectus itself. We fetch the primary document, find
+# the statement of operations, and read the most-recent-year total revenue.
+# This is heuristic: prospectus tables vary, so we return None (caller shows
+# "n/d") rather than a number we are unsure of.
+_REV_LABELS = (
+    r"total\s+net\s+revenues?", r"total\s+revenues?", r"total\s+net\s+sales",
+    r"net\s+revenues?", r"net\s+sales", r"total\s+revenue", r"revenues?",
+)
+
+
+def _html_to_text(html: str) -> str:
+    html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    html = re.sub(r"(?s)<[^>]+>", " ", html)
+    html = html.replace("&nbsp;", " ").replace("&#160;", " ").replace("&amp;", "&")
+    html = re.sub(r"&#?\w+;", " ", html)
+    return re.sub(r"[ \t ]+", " ", html)
+
+
+def _primary_doc(items: list[dict], form: str) -> str | None:
+    htm = [it for it in items
+           if str(it.get("name", "")).lower().endswith((".htm", ".html"))]
+    # The primary document's type equals the submission form type.
+    for it in htm:
+        if str(it.get("type", "")) == form:
+            return it["name"]
+    # Fallback: the largest .htm that is not an R-file or an exhibit.
+    cand = [it for it in htm
+            if not str(it["name"]).lower().startswith("r")
+            and "ex" not in str(it["name"]).lower()]
+    if cand:
+        return max(cand, key=lambda it: int(it.get("size", 0) or 0))["name"]
+    return None
+
+
+def _extract_revenue(text: str) -> str | None:
+    low = text.lower()
+    anchor = None
+    for pat in (r"consolidated\s+statements?\s+of\s+operations",
+                r"statements?\s+of\s+operations",
+                r"statements?\s+of\s+income"):
+        m = re.search(pat, low)
+        if m:
+            anchor = m.start()
+            break
+    if anchor is None:
+        return None
+
+    window = text[anchor: anchor + 7000]
+    wlow = window.lower()
+    scale = 1.0
+    seg = low[max(0, anchor - 1500): anchor + 1500]
+    if "in thousands" in seg or "in thousands" in wlow:
+        scale = 1_000.0
+    elif "in millions" in seg or "in millions" in wlow:
+        scale = 1_000_000.0
+
+    # Column order = order the fiscal years appear in the table header.
+    years: list[int] = []
+    for y in re.findall(r"\b(20\d\d)\b", window):
+        iy = int(y)
+        if iy not in years:
+            years.append(iy)
+        if len(years) >= 4:
+            break
+
+    for lp in _REV_LABELS:
+        m = re.search(lp + r"[^\d\(\)]{0,40}?(\(?\$?\s*[\d,]+(?:\.\d+)?\)?"
+                      r"(?:[^\d]{1,14}\(?\$?\s*[\d,]+(?:\.\d+)?\)?){0,3})", wlow)
+        if not m:
+            continue
+        nums = [float(n.replace(",", ""))
+                for n in re.findall(r"[\d,]+(?:\.\d+)?", m.group(1))
+                if n.strip(",")]
+        nums = [n for n in nums if n > 0]
+        if not nums:
+            continue
+        idx = years.index(max(years)) if years else 0  # most-recent-year column
+        val = nums[idx] if idx < len(nums) else nums[0]
+        val *= scale
+        if 0 < val < 1e13:
+            return _fmt_usd(val)
+    return None
+
+
+def prospectus_revenue(cik: str, filename: str, form: str) -> str | None:
+    """Most-recent-FY total revenue read from the prospectus, or None."""
+    base = _accession_dir(cik, filename)
+    if not base:
+        return None
+    try:
+        idx = httpclient.get_json(f"{base}/index.json", sec=True)
+    except Exception:
+        return None
+    doc = _primary_doc(idx.get("directory", {}).get("item", []), form)
+    if not doc:
+        return None
+    try:
+        html = httpclient.get(f"{base}/{doc}", sec=True).text
+    except Exception:
+        return None
+    return _extract_revenue(_html_to_text(html))
+
+
 # --- Offering size from the filing-fee exhibit ----------------------------
 _ACC_RE = re.compile(r"(\d{10}-\d{2}-\d{6})")
 _MONEY_RE = re.compile(r"\$?\s*([\d,]+(?:\.\d+)?)")

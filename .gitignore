@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 # Rendered output is delivered to Slack/SharePoint, not committed.
 IPO_Sweep_*.pdf
+_scratch/
