@@ -14,9 +14,9 @@ problem: >
 schedule:
   # GitHub cron cannot express "every second Thursday", so the workflow fires
   # every Thursday and the run self-skips on the off-week (ISO-week parity,
-  # BIWEEKLY_PARITY). Anchored to land ~07:00 Sydney.
-  cron: "0 20 * * 4"
-  description: "Every second Thursday, 07:00 Sydney (Thu 20:00 UTC; off-weeks self-skip)"
+  # BIWEEKLY_PARITY). Wed 20:00 UTC lands Thu 07:00 Sydney (AEDT) / 06:00 (AEST).
+  cron: "0 20 * * 3"
+  description: "Every second Thursday, 07:00 Sydney (Wed 20:00 UTC; off-weeks self-skip)"
 runs_on: GitHub Actions (.github/workflows/biweekly.yml), ubuntu-latest, Python 3.13, weekly Thursday cron with in-code biweekly gate + manual workflow_dispatch
 inputs:
   - "stockanalysis.com /ipos/ recently-priced calendar (priced spine; ticker, company, IPO date, IPO price)"

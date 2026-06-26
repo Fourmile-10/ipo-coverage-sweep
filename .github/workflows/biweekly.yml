@@ -12,10 +12,11 @@ on:
         required: false
         default: ""
   schedule:
-    # GitHub cron is UTC and ignores DST. Thu 20:00 UTC = Fri 06:00 Sydney
-    # (AEST) / 07:00 (AEDT). The job fires every Thursday; off-weeks self-skip
-    # via the BIWEEKLY_PARITY gate in main.py.
-    - cron: "0 20 * * 4"
+    # GitHub cron is UTC and ignores DST. Wed 20:00 UTC = Thu 07:00 Sydney
+    # (AEDT, summer) / Thu 06:00 (AEST, winter). Anchored to AEDT so the run is
+    # never later than its 07:00 Thursday target. The job fires every Thursday;
+    # off-weeks self-skip via the BIWEEKLY_PARITY gate in main.py.
+    - cron: "0 20 * * 3"
 
 jobs:
   sweep:

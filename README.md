@@ -80,7 +80,7 @@ python main.py --force --channel D0XXXXXXXXX
 
 ## Schedule
 
-GitHub Actions fires every Thursday 20:00 UTC (~07:00 Sydney). Off-weeks
-self-skip via the `BIWEEKLY_PARITY` gate, so the net cadence is every second
-Thursday. Manual runs (Actions, Run workflow) always run and accept a channel
-and window-end override.
+GitHub Actions fires every Thursday (cron `0 20 * * 3`, Wed 20:00 UTC = Thu
+07:00 Sydney AEDT / 06:00 AEST). Off-weeks self-skip via the `BIWEEKLY_PARITY`
+gate, so the net cadence is every second Thursday. Manual runs (Actions, Run
+workflow) always run and accept a channel and window-end override.

@@ -30,7 +30,9 @@ SYDNEY_TZ = ZoneInfo("Australia/Sydney")
 # express "every two weeks", so the workflow fires every Thursday and the run
 # self-skips on the off-week. Parity is taken against the ISO week number of
 # the Sydney-local run date. 0 = even ISO weeks, 1 = odd ISO weeks.
-BIWEEKLY_PARITY = int(os.environ.get("BIWEEKLY_PARITY", "0"))
+# `or "0"` guards against the env var being present but empty (an unset GitHub
+# Actions variable expands to ""), which would otherwise crash int("").
+BIWEEKLY_PARITY = int(os.environ.get("BIWEEKLY_PARITY") or "0")
 
 # --- Thresholds ------------------------------------------------------------
 MIN_DEAL_SIZE = 100_000_000      # priced names must clear >$100M (deal or cap)
