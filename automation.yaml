@@ -1,0 +1,33 @@
+name: IPO Coverage Sweep
+slug: ipo-coverage-sweep
+status: active
+owner: TT
+summary: >
+  Biweekly pull of newly priced and newly filed US IPOs from public sources
+  (no login anywhere), rendered to a Decade-branded PDF, posted with a clean
+  summary to Slack and archived to SharePoint.
+problem: >
+  Tracking new US listings and registrations by hand is slow and easy to miss
+  (a marquee name with no 424B4, or a foreign issuer that registers on F-1).
+  This sweeps both the priced calendar and the EDGAR index files every
+  fortnight and puts the on-profile names in front of the team.
+schedule:
+  # GitHub cron cannot express "every second Thursday", so the workflow fires
+  # every Thursday and the run self-skips on the off-week (ISO-week parity,
+  # BIWEEKLY_PARITY). Anchored to land ~07:00 Sydney.
+  cron: "0 20 * * 4"
+  description: "Every second Thursday, 07:00 Sydney (Thu 20:00 UTC; off-weeks self-skip)"
+runs_on: GitHub Actions (.github/workflows/biweekly.yml), ubuntu-latest, Python 3.13, weekly Thursday cron with in-code biweekly gate + manual workflow_dispatch
+inputs:
+  - "stockanalysis.com /ipos/ recently-priced calendar (priced spine; ticker, company, IPO date, IPO price)"
+  - "stockanalysis.com overview API (per-ticker market cap, revenue TTM, sector, exchange)"
+  - "EDGAR daily-index master.idx files (filings spine; S-1, S-1/A, F-1, F-1/A, complete, no full-text-search truncation)"
+  - "EDGAR submissions + companyfacts + 424B4 (new-filer test, revenue, priced confirmation)"
+outputs:
+  - "Slack — header + Section A/B summary with the PDF attached via files_upload_v2"
+  - "SharePoint — PDF archived to Investing - Frameworks / IPO Coverage Sweep - Automation"
+systems: [stockanalysis.com, SEC EDGAR, Slack, SharePoint, GitHub Actions]
+onedrive_path: "Investing - Frameworks/IPO Coverage Sweep - Automation"
+repo: tt7676/ipo-coverage-sweep
+tags: [primary-research, ipo, edgar, biweekly, slack-output, pdf]
+last_audited: 2026-06-26

@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Rendered output is delivered to Slack/SharePoint, not committed.
+IPO_Sweep_*.pdf

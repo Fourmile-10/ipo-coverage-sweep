@@ -1,0 +1,52 @@
+name: IPO Coverage Sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_id:
+        description: "Override Slack channel/DM ID (blank = team channel). Use a DM ID like D0123456789 to test against your own DMs."
+        required: false
+        default: ""
+      window_end:
+        description: "Pin the window end date YYYY-MM-DD (blank = today, Sydney)."
+        required: false
+        default: ""
+  schedule:
+    # GitHub cron is UTC and ignores DST. Thu 20:00 UTC = Fri 06:00 Sydney
+    # (AEST) / 07:00 (AEDT). The job fires every Thursday; off-weeks self-skip
+    # via the BIWEEKLY_PARITY gate in main.py.
+    - cron: "0 20 * * 4"
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run IPO sweep
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          SHAREPOINT_DEST: ${{ secrets.SHAREPOINT_DEST }}
+          BIWEEKLY_PARITY: ${{ vars.BIWEEKLY_PARITY }}
+          CHANNEL_OVERRIDE: ${{ inputs.channel_id }}
+          WINDOW_END: ${{ inputs.window_end }}
+        run: |
+          ARGS=""
+          # Manual dispatch always runs (bypass the off-week gate); the cron
+          # path runs without --force so the biweekly gate applies.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARGS="$ARGS --force"
+          fi
+          if [ -n "$CHANNEL_OVERRIDE" ]; then ARGS="$ARGS --channel $CHANNEL_OVERRIDE"; fi
+          if [ -n "$WINDOW_END" ]; then ARGS="$ARGS --window-end $WINDOW_END"; fi
+          python main.py $ARGS
