@@ -19,7 +19,8 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle,
+    BaseDocTemplate, Frame, HRFlowable, KeepTogether, PageTemplate, Paragraph,
+    Spacer, Table, TableStyle,
 )
 
 import content
@@ -67,6 +68,14 @@ def _styles():
                                fontSize=8, leading=10),
         "cellh": ParagraphStyle("cellh", parent=ss["BodyText"], fontName=_BOLD,
                                 fontSize=8, leading=10, textColor=colors.white),
+        "cardtitle": ParagraphStyle("cardtitle", parent=ss["Heading2"], fontName=_BOLD,
+                                    fontSize=12.5, textColor=NAVY, spaceBefore=2, spaceAfter=0),
+        "cardsub": ParagraphStyle("cardsub", parent=ss["BodyText"], fontName=_BASE,
+                                  fontSize=8.5, textColor=MIDBLUE, spaceAfter=5),
+        "mlabel": ParagraphStyle("mlabel", parent=ss["BodyText"], fontName=_BASE,
+                                 fontSize=6.5, textColor=GREY, leading=8),
+        "mval": ParagraphStyle("mval", parent=ss["BodyText"], fontName=_BOLD,
+                               fontSize=9, textColor=colors.HexColor("#1A1A1A"), leading=11),
     }
     return out
 
@@ -114,17 +123,26 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
     if not priced.ipos:
         story.append(Paragraph("Nothing priced >$100M this window.", st["body"]))
     else:
+        story.append(_summary_table(priced.ipos, st))
+        story.append(Spacer(1, 12))
         for ipo in priced.ipos:
             c = content.priced_card(ipo)
-            story.append(Paragraph(_e(c["header"]), st["h2"]))
-            for label, key, style in (("What it does", "business", "body"),
-                                      ("Leadership", "leadership", "body"),
-                                      ("Financials", "financials", "body"),
-                                      ("Backers", "backers", "body"),
-                                      ("Lane", "lane", "body"),
-                                      ("Source", "source", "small")):
-                story.append(Paragraph(f"<b>{label}:</b> {_e(c[key])}", st[style]))
-            story.append(Spacer(1, 8))
+            block = [
+                Paragraph(_e(c["header"]), st["cardtitle"]),
+                Paragraph(_e(c["subtitle"]), st["cardsub"]),
+                _metric_grid(c["metrics"], st, doc.width),
+                Spacer(1, 5),
+            ]
+            for label, key in (("What it does", "business"),
+                               ("Leadership", "leadership"),
+                               ("Use of proceeds", "use_of_proceeds"),
+                               ("Backers", "backers"),
+                               ("Lane", "lane")):
+                block.append(Paragraph(f"<b>{label}:</b> {_e(c[key])}", st["body"]))
+            block.append(Paragraph(f"Source: {_e(c['source'])}", st["small"]))
+            story.append(KeepTogether(block))
+            story.append(HRFlowable(width="100%", thickness=0.4, spaceBefore=9,
+                                    spaceAfter=9, color=colors.HexColor("#D7DEEC")))
 
     # --- Section B ---
     story.append(Paragraph("Section B. Newly filed (in registration)", st["h1"]))
@@ -151,6 +169,54 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
 
     doc.build(story)
     return path
+
+
+def _summary_table(ipos, st):
+    head = [Paragraph(c, st["cellh"]) for c in content.SUMMARY_COLUMNS]
+    rows = [head]
+    for ipo in ipos:
+        rows.append([Paragraph(_e(c), st["cell"]) for c in content.summary_row(ipo)])
+    widths = [1.8 * inch, 0.75 * inch, 0.6 * inch, 0.75 * inch, 0.85 * inch,
+              1.45 * inch, 0.8 * inch]
+    t = Table(rows, colWidths=widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6E8")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return t
+
+
+def _metric_grid(metrics, st, width):
+    cells, row = [], []
+    for label, val in metrics:
+        row.append([Paragraph(_e(label).upper(), st["mlabel"]),
+                    Paragraph(_e(val), st["mval"])])
+        if len(row) == 4:
+            cells.append(row)
+            row = []
+    if row:
+        while len(row) < 4:
+            row.append("")
+        cells.append(row)
+    cw = width / 4.0
+    t = Table(cells, colWidths=[cw] * 4)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), LIGHT),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.white),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6E8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return t
 
 
 def _filer_table(title, filers, st):

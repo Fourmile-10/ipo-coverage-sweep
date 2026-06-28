@@ -43,11 +43,61 @@ def _exch(ipo: sa.PricedIPO) -> str:
 
 
 # --- Section A: per-company card -------------------------------------------
+def _pct(v) -> str:
+    return "n/d" if v is None else f"{v:+.0f}%"
+
+
+def _rev_label(p) -> str:
+    if not p:
+        return "Revenue"
+    if p.is_bank:
+        return "Interest income"
+    if (p.revenue_kind or "").startswith("revenue (US$"):
+        return "Revenue (US$)"
+    return "Revenue"
+
+
+def _rev_value(p) -> str:
+    if not p:
+        return "n/d"
+    if p.pre_revenue and p.revenue is None:
+        return "pre-revenue"
+    if p.revenue is None:
+        return "n/d"
+    seg = _m(p.revenue)
+    extra = []
+    if p.revenue_period:
+        extra.append(p.revenue_period)
+    if p.yoy_growth is not None:
+        extra.append(f"{p.yoy_growth:+.0f}% YoY")
+    return seg + (f" ({', '.join(extra)})" if extra else "")
+
+
 def priced_header(ipo: sa.PricedIPO) -> str:
+    return f"{short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker})"
+
+
+def card_subtitle(ipo: sa.PricedIPO) -> str:
+    sector = ipo.sector or ipo.industry or "sector n/d"
+    return f"{sector}  ·  {_exch(ipo)}  ·  priced {ipo.ipo_date}"
+
+
+def card_metrics(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
+    """Key figures for the stat grid (label, value)."""
     p = ipo.profile
-    return (f"{short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker}) — priced "
-            f"{ipo.ipo_date} at {_price_s(ipo)}; raise {_m(p and p.gross_proceeds)}; "
-            f"impl. val {_m(p and p.impl_valuation)}")
+    ni = _m(p and p.net_income)
+    if p and p.net_income is not None and p.net_margin is not None:
+        ni = f"{_m(p.net_income)} ({p.net_margin:+.0f}%)"
+    return [
+        ("Offer price", _price_s(ipo)),
+        ("Raise", _m(p and p.gross_proceeds)),
+        ("Impl. valuation", _m(p and p.impl_valuation)),
+        ("Employees", (p.employees if (p and p.employees) else "n/d")),
+        (_rev_label(p), _rev_value(p)),
+        ("Gross margin", _pct(p and p.gross_margin)),
+        ("Net income", ni),
+        ("Source", (f"{p.source_form}" if (p and p.resolved) else "no filing")),
+    ]
 
 
 def _leadership_line(p) -> str:
@@ -101,13 +151,34 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
     src = f"{p.source_form} {p.accession}" if (p and p.resolved) else "no EDGAR prospectus found"
     return {
         "header": priced_header(ipo),
+        "subtitle": card_subtitle(ipo),
+        "metrics": card_metrics(ipo),
         "business": (p.business if (p and p.business) else NOT_DISCLOSED),
         "leadership": _leadership_line(p),
         "financials": _financials_line(p),
         "backers": (", ".join(p.backers) if (p and p.backers) else NOT_DISCLOSED),
+        "use_of_proceeds": (p.use_of_proceeds if (p and p.use_of_proceeds) else NOT_DISCLOSED),
         "lane": f"{ipo.lane}, {why}",
         "source": src,
     }
+
+
+# --- Section A: scannable summary table ------------------------------------
+SUMMARY_COLUMNS = ["Company", "Priced", "Price", "Raise", "Impl. val",
+                   "Revenue", "Lane"]
+
+
+def summary_row(ipo: sa.PricedIPO) -> list[str]:
+    p = ipo.profile
+    return [
+        f"{short_name(ipo.name)} ({ipo.ticker})",
+        ipo.ipo_date,
+        _price_s(ipo),
+        _m(p and p.gross_proceeds),
+        _m(p and p.impl_valuation),
+        _rev_value(p),
+        ipo.lane,
+    ]
 
 
 # --- Section B rows ---------------------------------------------------------
@@ -213,10 +284,11 @@ def profile_text(ipo: sa.PricedIPO) -> str:
     """Plain-text card for the PDF-failure fallback path."""
     c = priced_card(ipo)
     return "\n".join([
-        f"*{c['header']}*",
+        f"*{c['header']}*  {c['subtitle']}",
         f"  What it does: {c['business']}",
         f"  Leadership: {c['leadership']}",
         f"  Financials: {c['financials']}",
+        f"  Use of proceeds: {c['use_of_proceeds']}",
         f"  Backers: {c['backers']}",
         f"  Lane: {c['lane']}",
         f"  Source: {c['source']}",
