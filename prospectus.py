@@ -188,16 +188,13 @@ _BOILERPLATE = re.compile(
     r"obligation of dealers|deliver a prospectus|net proceeds|"
     r"emerging growth company|jobs act|jumpstart our business|smaller reporting company|"
     r"reduced public company|representation to the contrary|may have changed since|"
-    r"good faith estimates|market data|industry data|results of operations may",
+    r"good faith estimates|market data|industry data|results of operations may|"
+    r"going concern|history of (?:net |operating )?losses|"
+    r"this is the initial public offering|initial public offering of|"
+    r"private placement|expect to (?:incur|continue to incur)|incurred (?:a )?net loss|"
+    r"operating losses|net losses",
     re.I,
 )
-# A real opening line of a business description tends to start like this. The
-# subject may be a multi-word company name ("First Carolina is a ...").
-_DESC_START = re.compile(
-    r"(?:^|\. )((?:We are|We design|We develop|We operate|We provide|We build|"
-    r"We were|We help|Our (?:company|mission)\b|"
-    r"[A-Z][\w.'-]+(?:\s+[A-Z][\w.'-]+){0,2} is (?:a|an|the|one)|"
-    r"[A-Z][\w.'-]+(?:\s+[A-Z][\w.'-]+){0,2} (?:is|was) founded)\b[^.]{20,})", re.S)
 
 
 def _collect_sentences(start: str) -> str:
@@ -212,15 +209,67 @@ def _collect_sentences(start: str) -> str:
     return " ".join(out).strip()
 
 
+_LEGAL_TAIL = re.compile(r"[,\s]+(?:Inc\.?|LLC|L\.?P\.?|PLC|plc|Ltd\.?|Limited|"
+                         r"Corp\.?|Corporation|Co\.?|Company|N\.V\.|S\.A\.|AG)$", re.I)
+
+
+def _name_stem(name: str) -> str:
+    """First two words of the company name, legal suffix removed, for matching
+    the 'X is a ...' opener (e.g. 'DPC Holdings', 'Deep Fission')."""
+    n = name or ""
+    prev = None
+    while prev != n:                       # strip trailing legal tokens
+        prev = n
+        n = _LEGAL_TAIL.sub("", n).strip(" ,")
+    return " ".join(n.split()[:2])
+
+
+def _is_desc_lead(sentence: str, stem: str) -> bool:
+    s = sentence.strip()
+    if len(s) < 25 or _BOILERPLATE.search(s):
+        return False
+    if re.match(r"(We are|We design|We develop|We manufacture|We operate|We provide|"
+                r"We build|We offer|We help|We were|At |Our (?:company|mission)\b)", s):
+        return True
+    if stem and stem.lower() in s[:60].lower():
+        return True
+    return bool(re.search(r"\bis (?:a|an|the)\b", s[:90]))
+
+
 def extract_business(name: str, flat: str) -> str:
-    sect = _section(flat, (r"prospectus summary", r"company overview",
-                           r"business overview", r"our company", r"\boverview\b"))
-    scope = sect or flat[:15000]
-    for hay in (scope, flat[:60000]):
-        for m in _DESC_START.finditer(hay):
-            if _BOILERPLATE.search(m.group(1)):
+    """The company's own 'what we do', preferring the canonical opener.
+
+    Priority: the 'Overview' sub-heading's first real sentence, then a strong
+    opener ('{Company} is a ...', 'We are a/the ...', 'We design/manufacture
+    ...'), skipping risk-factor / offering boilerplate.
+    """
+    stem = _name_stem(name)
+    front = flat   # the business overview can sit well past the first 150K chars
+
+    # 1) The "Overview" sub-heading. Its first sentence is often just the bare
+    #    company name ("Deep Fission, Inc."), so scan the first few sentences for
+    #    the real description lead and collect from there.
+    for m in re.finditer(r"\bOverview\b\s+", front):
+        sents = _SENT.split(front[m.end(): m.end() + 1600])
+        for i, s in enumerate(sents[:4]):
+            if _is_desc_lead(s, stem):
+                res = _collect_sentences(" ".join(sents[i:]))
+                if res:
+                    return res
+                break
+
+    # 2) A strong company / "we" opener anywhere in the document.
+    openers = [
+        rf"\b{re.escape(stem)}\b[^.]{{0,30}} is (?:a|an|the)\b[^.]{{15,}}" if stem else None,
+        r"\bWe are (?:a|an|the)\b[^.]{15,}",
+        r"\bWe (?:design|develop|manufacture|operate|provide|build|offer|are building)\b[^.]{15,}",
+        r"\bOur (?:company|mission) is\b[^.]{15,}",
+    ]
+    for pat in filter(None, openers):
+        for m in re.finditer(pat, front):
+            if _BOILERPLATE.search(m.group(0)):
                 continue
-            res = _collect_sentences(hay[m.start(1):])
+            res = _collect_sentences(front[m.start():])
             if res:
                 return res
     return ""
