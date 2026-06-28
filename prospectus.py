@@ -553,25 +553,7 @@ def _finalize(p: Profile) -> Profile:
     return p
 
 
-def revenue_label_for(cik: str, filename: str, form: str, foreign: bool,
-                      fy_max: int | None = None) -> str:
-    """Section B helper: revenue read from an S-1/F-1 with the same bank- and
-    foreign-aware extractor and sanity guards used for priced names."""
-    base = edgar._accession_dir(cik, filename)
-    if not base:
-        return "n/d"
-    try:
-        idx = httpclient.get_json(f"{base}/index.json", sec=True)
-    except Exception:
-        return "n/d"
-    doc = edgar._primary_doc(idx.get("directory", {}).get("item", []), form)
-    if not doc:
-        return "n/d"
-    try:
-        flat = re.sub(r"\s+", " ", html_to_text(httpclient.get(f"{base}/{doc}", sec=True).text))
-    except Exception:
-        return "n/d"
-    fin = extract_financials(flat, foreign or form.startswith("F-"), fy_max)
+def _fin_revenue_label(fin: dict) -> str:
     if fin["pre_revenue"] and fin["revenue"] is None:
         return "pre-revenue"
     v = fin["revenue"]
@@ -583,6 +565,33 @@ def revenue_label_for(cik: str, filename: str, form: str, foreign: bool,
     elif fin["revenue_kind"].startswith("revenue (US$"):
         label += " (US$ eq.)"
     return label
+
+
+def filer_detail(cik: str, filename: str, form: str, foreign: bool, name: str,
+                 fy_max: int | None = None) -> dict:
+    """Section B helper: revenue label + a short business one-liner from the
+    S-1/F-1, in a single document fetch."""
+    out = {"revenue": "n/d", "business": ""}
+    base = edgar._accession_dir(cik, filename)
+    if not base:
+        return out
+    try:
+        idx = httpclient.get_json(f"{base}/index.json", sec=True)
+    except Exception:
+        return out
+    doc = edgar._primary_doc(idx.get("directory", {}).get("item", []), form)
+    if not doc:
+        return out
+    try:
+        flat = re.sub(r"\s+", " ", html_to_text(httpclient.get(f"{base}/{doc}", sec=True).text))
+    except Exception:
+        return out
+    out["revenue"] = _fin_revenue_label(extract_financials(flat, foreign or form.startswith("F-"), fy_max))
+    biz = extract_business(name, flat)
+    if biz:
+        first = re.split(r"(?<=[.!?])\s+", biz)[0]
+        out["business"] = (first[:155].rstrip() + "...") if len(first) > 158 else first
+    return out
 
 
 def build_profile(ticker: str, name: str, price: float | None,

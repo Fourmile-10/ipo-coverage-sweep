@@ -78,26 +78,36 @@ def priced_header(ipo: sa.PricedIPO) -> str:
 
 
 def card_subtitle(ipo: sa.PricedIPO) -> str:
-    sector = ipo.sector or ipo.industry or "sector n/d"
-    return f"{sector}  ·  {_exch(ipo)}  ·  priced {ipo.ipo_date}"
+    return ipo.sector or ipo.industry or "Sector not disclosed"
 
 
-def card_metrics(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
-    """Key figures for the stat grid (label, value)."""
+def deal_stats(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
+    """Right-panel 'Deal' rows."""
     p = ipo.profile
-    ni = _m(p and p.net_income)
-    if p and p.net_income is not None and p.net_margin is not None:
-        ni = f"{_m(p.net_income)} ({p.net_margin:+.0f}%)"
-    return [
+    rows = [
+        ("Priced", ipo.ipo_date or "n/d"),
         ("Offer price", _price_s(ipo)),
         ("Raise", _m(p and p.gross_proceeds)),
         ("Impl. valuation", _m(p and p.impl_valuation)),
-        ("Employees", (p.employees if (p and p.employees) else "n/d")),
-        (_rev_label(p), _rev_value(p)),
-        ("Gross margin", _pct(p and p.gross_margin)),
-        ("Net income", ni),
-        ("Source", (f"{p.source_form}" if (p and p.resolved) else "no filing")),
     ]
+    if ipo.current_price is not None:
+        rows.append(("Current price", f"${ipo.current_price:g}"))
+    if ipo.return_pct is not None:
+        rows.append(("Return since IPO", f"{ipo.return_pct:+.0f}%"))
+    return rows
+
+
+def fin_stats(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
+    """Right-panel 'Financials' rows."""
+    p = ipo.profile
+    rows = [(_rev_label(p), _rev_value(p))]
+    if p and p.gross_margin is not None:
+        rows.append(("Gross margin", f"{p.gross_margin:.0f}%"))
+    rows.append(("Net income", _m(p and p.net_income)))
+    if p and p.net_margin is not None:
+        rows.append(("Net margin", f"{p.net_margin:+.0f}%"))
+    rows.append(("Employees", (p.employees if (p and p.employees) else "n/d")))
+    return rows
 
 
 def _leadership_line(p) -> str:
@@ -159,8 +169,12 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
     src = f"{p.source_form} {p.accession}" if (p and p.resolved) else "no EDGAR prospectus found"
     return {
         "header": priced_header(ipo),
+        "name": short_name(ipo.name),
+        "ticker": ipo.ticker,
+        "exch": _exch(ipo),
         "subtitle": card_subtitle(ipo),
-        "metrics": card_metrics(ipo),
+        "deal_stats": deal_stats(ipo),
+        "fin_stats": fin_stats(ipo),
         "business": (p.business if (p and p.business) else NOT_DISCLOSED),
         "leadership": _leadership_line(p),
         "financials": _financials_line(p),

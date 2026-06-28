@@ -127,22 +127,24 @@ def build_section_b(window_start: date, window_end: date, log: RunLog) -> FiledR
             continue
 
         foreign_flag, country = edgar.tag_domestic_or_foreign(f.form, sub)
-        # XBRL first (rare for first-time filers); fall back to scraping the
-        # revenue line out of the S-1/F-1 itself, which is where these issuers'
-        # numbers actually live.
+        company = sub.get("name") or f.company
+        # One prospectus fetch gives both a real business one-liner and revenue.
+        detail = prospectus.filer_detail(cik, f.filename, f.form, foreign_flag,
+                                         company, window_end.year)
+        # Prefer XBRL revenue when present (rare for first-time filers), else the
+        # figure scraped from the filing.
         rev = edgar.latest_annual_revenue(cik)
         if rev == "n/d":
-            rev = prospectus.revenue_label_for(cik, f.filename, f.form,
-                                               foreign_flag, window_end.year)
+            rev = detail["revenue"]
         filer = edgar.Filer(
             cik=cik,
-            company=sub.get("name") or f.company,
+            company=company,
             form=f.form,
             date_filed=_iso(f.date_filed),
             filename=f.filename,
             foreign=foreign_flag,
             country=country,
-            business=edgar.business_clause(sub),
+            business=detail["business"] or edgar.business_clause(sub),
             revenue_label=rev,
         )
         (foreign if foreign_flag else domestic).append(filer)

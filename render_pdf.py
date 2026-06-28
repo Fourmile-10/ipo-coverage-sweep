@@ -12,7 +12,7 @@ from datetime import date
 from xml.sax.saxutils import escape as _xml_escape
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -79,11 +79,17 @@ def _styles():
         "cardtitle": ParagraphStyle("cardtitle", parent=ss["Heading2"], fontName=_BOLD,
                                     fontSize=12.5, textColor=NAVY, spaceBefore=2, spaceAfter=0),
         "cardsub": ParagraphStyle("cardsub", parent=ss["BodyText"], fontName=_BASE,
-                                  fontSize=8.5, textColor=MIDBLUE, spaceAfter=5),
-        "mlabel": ParagraphStyle("mlabel", parent=ss["BodyText"], fontName=_BASE,
-                                 fontSize=6.5, textColor=GREY, leading=8),
-        "mval": ParagraphStyle("mval", parent=ss["BodyText"], fontName=_BOLD,
-                               fontSize=9, textColor=colors.HexColor("#1A1A1A"), leading=11),
+                                  fontSize=8.5, textColor=MIDBLUE, spaceAfter=4),
+        "bodyj": ParagraphStyle("bodyj", parent=ss["BodyText"], fontName=_BASE,
+                                fontSize=9.5, leading=13.5, alignment=TA_JUSTIFY,
+                                spaceAfter=3),
+        "panelhdr": ParagraphStyle("panelhdr", parent=ss["BodyText"], fontName=_BOLD,
+                                   fontSize=7, textColor=NAVY, leading=9),
+        "panellabel": ParagraphStyle("panellabel", parent=ss["BodyText"], fontName=_BASE,
+                                     fontSize=7.8, textColor=GREY, leading=10),
+        "panelval": ParagraphStyle("panelval", parent=ss["BodyText"], fontName=_BOLD,
+                                   fontSize=7.8, textColor=colors.HexColor("#1A1A1A"),
+                                   leading=10, alignment=2),
     }
     return out
 
@@ -132,28 +138,39 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
         story.append(Paragraph("Nothing priced >$100M this window.", st["body"]))
     else:
         story.append(_summary_table(priced.ipos, st))
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 14))
         for ipo in priced.ipos:
             c = content.priced_card(ipo)
-            block = [
-                Paragraph(_e(c["header"]), st["cardtitle"]),
+            name_html = (f'{_e(c["name"])}  <font size="9" color="#555555">'
+                         f'({_e(c["exch"])}: {_e(c["ticker"])})</font>')
+            left = [
+                Paragraph(name_html, st["cardtitle"]),
                 Paragraph(_e(c["subtitle"]), st["cardsub"]),
-                _metric_grid(c["metrics"], st, doc.width),
-                Spacer(1, 5),
+                Paragraph(_e(c["business"]), st["bodyj"]),
+                Paragraph(f'<b><font color="#1F3864">Leadership.</font></b> '
+                          f'{_e(c["leadership"])}', st["bodyj"]),
+                Paragraph(f'<b><font color="#1F3864">Use of proceeds.</font></b> '
+                          f'{_e(c["use_of_proceeds"])}', st["bodyj"]),
             ]
-            for label, key in (("What it does", "business"),
-                               ("Leadership", "leadership"),
-                               ("Use of proceeds", "use_of_proceeds")):
-                block.append(Paragraph(
-                    f'<b><font color="#1F3864">{label}:</font></b> {_e(c[key])}', st["body"]))
             if c.get("external"):
-                block.append(Paragraph(
-                    f'<b><font color="#1F3864">Context (external):</font></b> '
-                    f'<i>{_e(c["external"])}</i>', st["body"]))
-            block.append(Paragraph(f"Source: {_e(c['source'])}", st["small"]))
-            story.append(KeepTogether(block))
-            story.append(HRFlowable(width="100%", thickness=0.4, spaceBefore=9,
-                                    spaceAfter=9, color=colors.HexColor("#D7DEEC")))
+                left.append(Paragraph(f'<b><font color="#1F3864">Context.</font></b> '
+                                      f'<i>{_e(c["external"])}</i>', st["bodyj"]))
+            panel = _stats_panel(c["deal_stats"], c["fin_stats"], st, 2.45 * inch)
+            card = Table([[left, panel]], colWidths=[4.35 * inch, 2.55 * inch])
+            card.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 16),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            story.append(KeepTogether([
+                card, Spacer(1, 3),
+                Paragraph(f"Source: {_e(c['source'])}", st["small"]),
+            ]))
+            story.append(HRFlowable(width="100%", thickness=0.4, spaceBefore=10,
+                                    spaceAfter=10, color=colors.HexColor("#D7DEEC")))
 
     # --- Section B ---
     story.append(Paragraph("Section B. Newly filed (in registration)", st["h1"]))
@@ -203,30 +220,40 @@ def _summary_table(ipos, st):
     return t
 
 
-def _metric_grid(metrics, st, width):
-    cells, row = [], []
-    for label, val in metrics:
-        row.append([Paragraph(_e(label).upper(), st["mlabel"]),
-                    Paragraph(_e(val), st["mval"])])
-        if len(row) == 4:
-            cells.append(row)
-            row = []
-    if row:
-        while len(row) < 4:
-            row.append("")
-        cells.append(row)
-    cw = width / 4.0
-    t = Table(cells, colWidths=[cw] * 4)
-    t.setStyle(TableStyle([
+def _stats_panel(deal, fin, st, width):
+    """Right-hand key-stats panel: section headers, left labels, right-aligned values."""
+    data, hdr_rows = [], []
+
+    def add(label, val, hdr=False):
+        if hdr:
+            hdr_rows.append(len(data))
+            data.append([Paragraph(label, st["panelhdr"]), Paragraph("", st["panelval"])])
+        else:
+            data.append([Paragraph(_e(label), st["panellabel"]),
+                         Paragraph(_e(val), st["panelval"])])
+
+    add("DEAL", "", hdr=True)
+    for lab, val in deal:
+        add(lab, val)
+    add("FINANCIALS", "", hdr=True)
+    for lab, val in fin:
+        add(lab, val)
+
+    t = Table(data, colWidths=[width * 0.55, width * 0.45])
+    cmds = [
         ("BACKGROUND", (0, 0), (-1, -1), LIGHT),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.white),
-        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6E8")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-    ]))
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#C3CFE6")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+    ]
+    for r in hdr_rows:
+        cmds += [("SPAN", (0, r), (1, r)),
+                 ("TOPPADDING", (0, r), (1, r), 5 if r else 3),
+                 ("LINEBELOW", (0, r), (1, r), 0.4, colors.HexColor("#C3CFE6"))]
+    t.setStyle(TableStyle(cmds))
     return t
 
 

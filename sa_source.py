@@ -64,6 +64,8 @@ class PricedIPO:
     name: str
     ipo_date: str          # YYYY-MM-DD
     ipo_price: float | None
+    current_price: float | None = None    # latest price from the calendar feed
+    return_pct: float | None = None       # % move since the IPO price
     # enrichment (filled by enrich())
     market_cap: float | None = None       # USD
     market_cap_label: str = "not retrieved"
@@ -119,12 +121,15 @@ def fetch_recent_priced() -> list[PricedIPO]:
             for r in rows:
                 if not isinstance(r, dict) or not r.get("s"):
                     continue
+                ret = r.get("ipr")
                 out.append(
                     PricedIPO(
                         ticker=str(r["s"]).strip(),
                         name=str(r.get("n", "")).strip(),
                         ipo_date=str(r.get("ipoDate", "")).strip(),
                         ipo_price=parse_money(r.get("ipoPrice")),
+                        current_price=parse_money(r.get("ippc")),
+                        return_pct=(float(ret) if isinstance(ret, (int, float)) else None),
                     )
                 )
             return out
