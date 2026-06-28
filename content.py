@@ -189,12 +189,10 @@ def filer_row(f: Filer) -> list[str]:
         f.country or ("foreign" if f.foreign else "US"),
         f.business or "not disclosed",
         f.revenue_label,
-        f.offering_label,
     ]
 
 
-SECTION_B_COLUMNS = ["Company", "Filed", "Country", "Business", "Revenue (FY)",
-                     "Registered offering"]
+SECTION_B_COLUMNS = ["Company", "Filed", "Country", "Business", "Revenue (FY)"]
 
 
 # --- Slack assembly ---------------------------------------------------------
@@ -301,8 +299,7 @@ def section_b_text(filed: FiledResult) -> str:
             return f"*{title}:* none this window."
         rows = [f"  - {f.company} | filed {f.date_filed} | "
                 f"{f.country or ('foreign' if f.foreign else 'US')} | "
-                f"{f.business or 'not disclosed'} | rev {f.revenue_label} | "
-                f"offering {f.offering_label}" for f in filers]
+                f"{f.business or 'not disclosed'} | rev {f.revenue_label}" for f in filers]
         return f"*{title}:*\n" + "\n".join(rows)
     return block("Newly filed, domestic (S-1)", filed.domestic) + "\n\n" + \
         block("Newly filed, foreign (F-1)", filed.foreign)

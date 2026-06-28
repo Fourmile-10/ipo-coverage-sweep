@@ -138,7 +138,6 @@ def build_section_b(window_start: date, window_end: date, log: RunLog) -> FiledR
             country=country,
             business=edgar.business_clause(sub),
             revenue_label=rev,
-            offering_label=edgar.offering_size(cik, f.filename),
         )
         (foreign if foreign_flag else domestic).append(filer)
 

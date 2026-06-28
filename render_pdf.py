@@ -226,8 +226,8 @@ def _filer_table(title, filers, st):
         rows.append([Paragraph(_e(c), st["cell"]) for c in content.filer_row(f)])
     if len(rows) == 1:
         rows.append([Paragraph("None this window.", st["cell"])]
-                    + [Paragraph("", st["cell"]) for _ in range(5)])
-    widths = [1.5 * inch, 0.75 * inch, 0.9 * inch, 1.9 * inch, 0.85 * inch, 1.1 * inch]
+                    + [Paragraph("", st["cell"]) for _ in range(4)])
+    widths = [1.8 * inch, 0.8 * inch, 1.0 * inch, 2.5 * inch, 0.9 * inch]
     t = Table(rows, colWidths=widths, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
