@@ -103,18 +103,28 @@ def card_metrics(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
 def _leadership_line(p) -> str:
     if not p or not p.ceo_name:
         return f"CEO {NOT_DISCLOSED}"
-    parts = [f"CEO {p.ceo_name}"]
+    # CEO (+ founder tag).
+    ceo = f"CEO {p.ceo_name}"
     if p.is_founder is True:
-        parts.append("founder" + (f" ({p.founder_year})" if p.founder_year else ""))
-    elif p.is_founder is False:
-        parts.append("not founder-led")
-    elif p.founder_year:
-        parts.append(f"founded {p.founder_year}")
-    else:
-        parts.append("founder n/d")
+        ceo += " (founder" + (f", {p.founder_year}" if p.founder_year else "") + ")"
+    lead = [ceo]
+    if p.cfo_name:
+        lead.append(f"CFO {p.cfo_name}")
+    line = "; ".join(lead) + "."
+
+    extras = []
     if p.ceo_credential:
-        parts.append(p.ceo_credential)
-    return "; ".join(parts)
+        cred = p.ceo_credential.rstrip(".")
+        extras.append(cred[0].upper() + cred[1:])
+    # Co-founders other than the CEO.
+    others = [f for f in (p.founders or []) if f.lower() != p.ceo_name.lower()]
+    if others:
+        extras.append("co-founders " + ", ".join(others))
+    elif p.is_founder is not True and p.founder_year:
+        extras.append(f"company founded {p.founder_year}")
+    if extras:
+        line += " " + "; ".join(extras) + "."
+    return line
 
 
 def _financials_line(p) -> str:
@@ -146,8 +156,6 @@ def _financials_line(p) -> str:
 
 def priced_card(ipo: sa.PricedIPO) -> dict:
     p = ipo.profile
-    why = ("fits Glenn's lane (vertical SaaS / fintech / proptech / adjacency)"
-           if ipo.lane == "in-lane" else "outside the core lane on the business")
     src = f"{p.source_form} {p.accession}" if (p and p.resolved) else "no EDGAR prospectus found"
     return {
         "header": priced_header(ipo),
@@ -158,14 +166,12 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
         "financials": _financials_line(p),
         "backers": (", ".join(p.backers) if (p and p.backers) else NOT_DISCLOSED),
         "use_of_proceeds": (p.use_of_proceeds if (p and p.use_of_proceeds) else NOT_DISCLOSED),
-        "lane": f"{ipo.lane}, {why}",
         "source": src,
     }
 
 
 # --- Section A: scannable summary table ------------------------------------
-SUMMARY_COLUMNS = ["Company", "Priced", "Price", "Raise", "Impl. val",
-                   "Revenue", "Lane"]
+SUMMARY_COLUMNS = ["Company", "Priced", "Price", "Raise", "Impl. val", "Revenue"]
 
 
 def summary_row(ipo: sa.PricedIPO) -> list[str]:
@@ -177,7 +183,6 @@ def summary_row(ipo: sa.PricedIPO) -> list[str]:
         _m(p and p.gross_proceeds),
         _m(p and p.impl_valuation),
         _rev_value(p),
-        ipo.lane,
     ]
 
 
@@ -223,7 +228,7 @@ def slack_priced_line(ipo: sa.PricedIPO) -> str:
     sector = ipo.sector or ipo.industry or "n/d"
     return (f"• {short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker}) — {sector}, "
             f"{_price_s(ipo)}, raise {_m(p and p.gross_proceeds)}, "
-            f"impl. val {_m(p and p.impl_valuation)} [{ipo.lane}]")
+            f"impl. val {_m(p and p.impl_valuation)}")
 
 
 def slack_message(start: date, end: date, priced: PricedResult, filed: FiledResult) -> str:
@@ -288,7 +293,6 @@ def profile_text(ipo: sa.PricedIPO) -> str:
         f"  Financials: {c['financials']}",
         f"  Use of proceeds: {c['use_of_proceeds']}",
         f"  Backers: {c['backers']}",
-        f"  Lane: {c['lane']}",
         f"  Source: {c['source']}",
     ])
 
@@ -313,7 +317,7 @@ def self_audit_footer(start: date, end: date, flags: dict, counts: dict,
         f"({counts.get('priced_via_424b4', 0)} via 424B4, {counts.get('priced_via_s1', 0)} via S-1/A, "
         f"{counts.get('priced_via_f1', 0)} via F-1) + EDGAR index files. "
         f"Filings status: {'ok' if filings_ok else 'inconclusive'}. "
-        f"Flags: {flags['out-of-lane']} out-of-lane, {flags['raise-withheld']} raise-withheld, "
+        f"Flags: {flags['raise-withheld']} raise-withheld, "
         f"{flags['valuation-withheld']} valuation-withheld, {flags['size-unverified']} size-unverified. "
         f"PDF: {'attached' if pdf_ok else 'failed'}."
     )

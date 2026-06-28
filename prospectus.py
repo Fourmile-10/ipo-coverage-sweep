@@ -54,6 +54,8 @@ class Profile:
     is_founder: bool | None = None
     founder_year: str = ""
     ceo_credential: str = ""
+    cfo_name: str = ""
+    founders: list[str] = field(default_factory=list)
     employees: str = ""
     use_of_proceeds: str = ""
     backers: list[str] = field(default_factory=list)
@@ -285,36 +287,53 @@ _TITLEISH = re.compile(r"\b(Chief|Officer|President|Vice|Executive|Chairman|"
                        r"Scientific|Technology|Secretary|Treasurer|Manager)\b")
 
 
-def extract_leadership(flat: str) -> tuple[str, bool | None, str, str]:
-    """Return (ceo_name, is_founder, founder_year, credential)."""
-    ceo = ""
-    for pat in (_NAME + r"\s*,[^.]{0,70}?Chief Executive Officer",
-                r"Chief Executive Officer[,:\s]+(?:and\s+\w+\s+)?(" + _NAME + r")",
-                r"(?:our|its)\s+(?:President and\s+)?Chief Executive Officer[,:\s]+(" + _NAME + r")"):
+def _exec_by_title(flat: str, title: str) -> str:
+    """Find the person holding a given C-suite title, e.g. 'Chief Financial Officer'."""
+    for pat in (_NAME + r"\s*,[^.]{0,70}?" + title,
+                r"(?:our|its)\s+(?:[A-Za-z ]{0,30}?)" + title + r"[,:\s]+(?:and\s+\w+\s+)?(" + _NAME + r")",
+                title + r"[,:\s]+(?:and\s+\w+\s+)?(" + _NAME + r")"):
         for m in re.finditer(pat, flat):
             cand = (m.group(1) if m.groups() else m.group(0))
             cand = re.sub(r"\s*,.*$", "", cand).strip()
             cand = re.sub(r"\s+(?:Chief|President|Vice|Executive).*$", "", cand).strip()
             if cand and not _ENTITYISH.search(cand) and not _TITLEISH.search(cand):
-                ceo = cand
-                break
-        if ceo:
-            break
+                return cand
+    return ""
+
+
+def extract_leadership(flat: str) -> dict:
+    ceo = _exec_by_title(flat, "Chief Executive Officer")
+    cfo = _exec_by_title(flat, "Chief Financial Officer")
+    if cfo and cfo.lower() == ceo.lower():
+        cfo = ""   # a loose match picked up the CEO; drop it
 
     founder_year = ""
     fy = re.search(r"(?:co-)?founded\s+(?:the\s+(?:company|business)\s+)?in\s+(\d{4})", flat, re.I)
     if fy:
         founder_year = fy.group(1)
 
+    # Founders named after "founded ... by ...".
+    founders: list[str] = []
+    fm = re.search(r"(?:was|were)\s+(?:co-)?founded[^.]{0,40}?\bby\b([^.]{5,240})", flat, re.I)
+    if fm:
+        for nm in re.finditer(_NAME, fm.group(1)):
+            cand = nm.group(0).strip()
+            if (not _TITLEISH.search(cand) and not _ENTITYISH.search(cand)
+                    and cand.lower() not in (f.lower() for f in founders)):
+                founders.append(cand)
+
     is_founder = None
     if ceo:
         last = re.escape(ceo.split()[-1])
-        near = re.search(r"(?:found|co-found)\w*[^.]{0,140}?" + last
-                         + r"|" + last + r"[^.]{0,140}?(?:found|co-found)\w*", flat, re.I)
-        if near:
+        if any(ceo.lower() == f.lower() for f in founders):
             is_founder = True
-        elif re.search(r"\bfounder\b", flat, re.I):
-            is_founder = None
+        else:
+            near = re.search(r"(?:found|co-found)\w*[^.]{0,140}?" + last
+                             + r"|" + last + r"[^.]{0,140}?(?:found|co-found)\w*", flat, re.I)
+            if near:
+                is_founder = True
+            elif re.search(r"\bfounder\b", flat, re.I):
+                is_founder = None
 
     credential = ""
     if ceo:
@@ -323,7 +342,8 @@ def extract_leadership(flat: str) -> tuple[str, bool | None, str, str]:
                        r"|prior to[^.]{6,90}|served as[^.]{6,90})", flat, re.I)
         if cm:
             credential = re.sub(r"\s+", " ", cm.group(1)).strip().rstrip(",")[:100]
-    return ceo, is_founder, founder_year, credential
+    return {"ceo": ceo, "cfo": cfo, "is_founder": is_founder,
+            "founder_year": founder_year, "founders": founders, "credential": credential}
 
 
 def extract_employees(text: str) -> str:
@@ -371,23 +391,39 @@ def extract_use_of_proceeds(text: str) -> str:
     return sents[0][:200] if sents else ""
 
 
-def extract_backers(text: str) -> list[str]:
+_BACKER = re.compile(
+    r"\b([A-Z][A-Za-z0-9.&\-]+(?:\s+[A-Z][A-Za-z0-9.&\-]+){0,4}\s+"
+    r"(?:Capital|Partners|Ventures|Venture|Management|Fund|Funds|Investors|Equity))\b")
+_BACKER_STOP = re.compile(r"^(?:and|the|our|by|of|with|to|in|its|this|each|"
+                          r"all|other|certain|such|these|those|risk)\s+", re.I)
+# Underwriters cluster in the same kind of entity names but are not holders.
+_UNDERWRITERS = ("barclays", "goldman", "morgan stanley", "j.p. morgan", "jpmorgan",
+                 "citigroup", "citi ", "bofa", "merrill", "deutsche", "rbc", "ubs",
+                 "jefferies", "cantor", "wells fargo", "macquarie", "william blair",
+                 "blair", "btg pactual", "evercore", "piper", "cowen", "stifel",
+                 "needham", "raymond james", "truist", "keybanc", "baird",
+                 "guggenheim", "mizuho", "nomura", "ing ", "td securities")
+
+
+def extract_backers(text: str, company: str = "") -> list[str]:
+    """Named institutional holders (pre-IPO investors) from the principal-
+    stockholders section. Conservative by design: clean names or nothing, never
+    underwriters or the company itself."""
     sect = _section(text, (r"principal and selling stockholders",
-                           r"principal stockholders", r"selling stockholders"))
+                           r"principal stockholders", r"selling stockholders",
+                           r"security ownership"))
     if not sect:
         return []
-    # Entity-like names (Capital, Partners, Ventures, Fund) holding 5%+. Require
-    # capitalised tokens up to the keyword so we don't grab mid-phrase fragments.
-    names = []
-    seen = set()
-    for m in re.finditer(r"\b([A-Z][A-Za-z0-9.&\-]+(?:\s+[A-Z][A-Za-z0-9.&\-]+){0,4}\s+"
-                         r"(?:Capital|Partners|Ventures|Management|Holdings|Fund))\b", sect):
-        nm = re.sub(r"\s+", " ", m.group(1)).strip(" ,.")
-        nm = re.sub(r"^(?:and|the|our|by|of|with)\s+", "", nm, flags=re.I)
-        key = nm.lower()
-        if len(nm) > 5 and key not in seen:
-            seen.add(key)
-            names.append(nm)
+    stem = company.split()[0].lower() if company else ""
+    names, seen = [], set()
+    for m in _BACKER.finditer(sect):
+        nm = _BACKER_STOP.sub("", re.sub(r"\s+", " ", m.group(1)).strip(" ,.")).strip()
+        low = nm.lower()
+        if (len(nm) <= 5 or low in seen or _TITLEISH.search(nm)
+                or (stem and stem in low) or any(u in low for u in _UNDERWRITERS)):
+            continue
+        seen.add(low)
+        names.append(nm)
     return names[:4]
 
 
@@ -611,10 +647,16 @@ def build_profile(ticker: str, name: str, price: float | None,
     p.post_offering_shares = off["post_offering_shares"]
 
     p.business = extract_business(name, flat)
-    p.ceo_name, p.is_founder, p.founder_year, p.ceo_credential = extract_leadership(flat)
+    lead = extract_leadership(flat)
+    p.ceo_name = lead["ceo"]
+    p.cfo_name = lead["cfo"]
+    p.is_founder = lead["is_founder"]
+    p.founder_year = lead["founder_year"]
+    p.founders = lead["founders"]
+    p.ceo_credential = lead["credential"]
     p.employees = extract_employees(flat)
     p.use_of_proceeds = extract_use_of_proceeds(flat)
-    p.backers = extract_backers(flat)
+    p.backers = extract_backers(flat, name)
 
     fin = extract_financials(flat, p.foreign, fy_max)
     p.revenue = fin["revenue"]

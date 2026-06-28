@@ -26,12 +26,6 @@ class PricedResult:
     profiled: list[sa.PricedIPO]
 
 
-def _on_profile(ipo: sa.PricedIPO) -> bool:
-    biz = getattr(ipo.profile, "business", "") if ipo.profile else ""
-    hay = " ".join([ipo.name, ipo.sector, ipo.industry, ipo.description, biz]).lower()
-    return any(h in hay for h in config.ON_PROFILE_HINTS)
-
-
 def build_section_a(window_start: date, window_end: date, log: RunLog) -> PricedResult:
     rows = sa.fetch_recent_priced()           # raises on failure -> fail loud
     log.source("stockanalysis priced calendar", ok=True, count=len(rows))
@@ -70,7 +64,6 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
         else:
             continue                              # genuinely small domestic deal, drop
 
-        ipo.lane = "in-lane" if _on_profile(ipo) else "out-of-lane"
         ipo.flags.extend(prof.flags)
         kept.append(ipo)
 
@@ -158,7 +151,6 @@ def tally_flags(priced: PricedResult) -> dict:
     def count(tag):
         return sum(1 for i in priced.ipos if tag in i.flags)
     return {
-        "out-of-lane": sum(1 for i in priced.ipos if i.lane == "out-of-lane"),
         "raise-withheld": count("raise-withheld"),
         "valuation-withheld": count("valuation-withheld"),
         "size-unverified": count("size-unverified"),

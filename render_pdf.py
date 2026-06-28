@@ -47,6 +47,14 @@ for _name, _bold, _paths in (
                 pass
             break
 
+# Map the family so the inline <b> tag resolves to the bold face. Without this,
+# a TTF base font (Arial) renders <b> as regular, so labels look un-bolded.
+try:
+    pdfmetrics.registerFontFamily(_BASE, normal=_BASE, bold=_BOLD,
+                                  italic=_BASE, boldItalic=_BOLD)
+except Exception:
+    pass
+
 
 def _e(text) -> str:
     """Escape dynamic text so reportlab's mini-XML parser does not choke on & < >."""
@@ -136,9 +144,9 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
             for label, key in (("What it does", "business"),
                                ("Leadership", "leadership"),
                                ("Use of proceeds", "use_of_proceeds"),
-                               ("Backers", "backers"),
-                               ("Lane", "lane")):
-                block.append(Paragraph(f"<b>{label}:</b> {_e(c[key])}", st["body"]))
+                               ("Backers", "backers")):
+                block.append(Paragraph(
+                    f'<b><font color="#1F3864">{label}:</font></b> {_e(c[key])}', st["body"]))
             block.append(Paragraph(f"Source: {_e(c['source'])}", st["small"]))
             story.append(KeepTogether(block))
             story.append(HRFlowable(width="100%", thickness=0.4, spaceBefore=9,
