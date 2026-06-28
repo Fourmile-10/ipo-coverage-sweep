@@ -28,6 +28,6 @@ outputs:
   - "SharePoint — PDF archived to Investing - Frameworks / IPO Coverage Sweep - Automation"
 systems: [stockanalysis.com, SEC EDGAR, Slack, SharePoint, GitHub Actions]
 onedrive_path: "Investing - Frameworks/IPO Coverage Sweep - Automation"
-repo: tt7676/ipo-coverage-sweep
+repo: Fourmile-10/ipo-coverage-sweep
 tags: [primary-research, ipo, edgar, biweekly, slack-output, pdf]
 last_audited: 2026-06-26
