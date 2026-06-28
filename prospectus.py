@@ -482,6 +482,14 @@ def _finalize(p: Profile) -> Profile:
         p.flags.append("raise-withheld")
         p.notes.append("Raise withheld (implausible vs any real IPO; likely a share-count mis-read).")
         p.gross_proceeds = p.shares_offered = None
+    # An implausibly small float (raise << implied valuation) means the
+    # post-offering share count was almost certainly over-read (fully-diluted or
+    # authorized rather than basic). Withhold the valuation rather than print it.
+    if p.gross_proceeds and p.impl_valuation and p.gross_proceeds / p.impl_valuation < 0.03:
+        p.flags.append("valuation-withheld")
+        p.notes.append("Implied valuation withheld (raise is an implausibly small "
+                       "share of it; post-offering share count suspect).")
+        p.impl_valuation = None
     if p.impl_valuation and p.revenue and p.revenue > 0:
         if p.impl_valuation / p.revenue > 200 and p.impl_valuation > 50e9:
             p.flags.append("valuation-withheld")

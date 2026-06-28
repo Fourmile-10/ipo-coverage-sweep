@@ -18,7 +18,7 @@ _ACQ = re.compile(r"\bacquisitions?\b", re.I)
 # A serial-sponsor roman numeral after a sponsor word: "Gores Holdings XI",
 # "Cantor Equity Partners VII". Anchored to avoid matching "Holdings LLC".
 _ROMAN = re.compile(
-    r"\b(?:holdings|acquisition|capital|partners|ventures|sponsor)\s+"
+    r"\b(?:holdings|acquisition|capital|partners|ventures|sponsor|corporation|corp)\s+"
     r"(?:II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV)\b",
     re.I,
 )
