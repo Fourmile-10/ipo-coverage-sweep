@@ -164,7 +164,6 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
         "business": (p.business if (p and p.business) else NOT_DISCLOSED),
         "leadership": _leadership_line(p),
         "financials": _financials_line(p),
-        "backers": (", ".join(p.backers) if (p and p.backers) else NOT_DISCLOSED),
         "use_of_proceeds": (p.use_of_proceeds if (p and p.use_of_proceeds) else NOT_DISCLOSED),
         "external": (p.external_color if (p and p.external_color) else ""),
         "source": src,
@@ -293,7 +292,6 @@ def profile_text(ipo: sa.PricedIPO) -> str:
         f"  Leadership: {c['leadership']}",
         f"  Financials: {c['financials']}",
         f"  Use of proceeds: {c['use_of_proceeds']}",
-        f"  Backers: {c['backers']}",
     ]
     if c.get("external"):
         lines.append(f"  Context (external): {c['external']}")

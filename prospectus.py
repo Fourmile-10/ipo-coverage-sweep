@@ -58,7 +58,6 @@ class Profile:
     founders: list[str] = field(default_factory=list)
     employees: str = ""
     use_of_proceeds: str = ""
-    backers: list[str] = field(default_factory=list)
     external_color: str = ""   # optional web-search context (tagged external)
     # financials
     revenue: float | None = None
@@ -392,42 +391,6 @@ def extract_use_of_proceeds(text: str) -> str:
     return sents[0][:200] if sents else ""
 
 
-_BACKER = re.compile(
-    r"\b([A-Z][A-Za-z0-9.&\-]+(?:\s+[A-Z][A-Za-z0-9.&\-]+){0,4}\s+"
-    r"(?:Capital|Partners|Ventures|Venture|Management|Fund|Funds|Investors|Equity))\b")
-_BACKER_STOP = re.compile(r"^(?:and|the|our|by|of|with|to|in|its|this|each|"
-                          r"all|other|certain|such|these|those|risk)\s+", re.I)
-# Underwriters cluster in the same kind of entity names but are not holders.
-_UNDERWRITERS = ("barclays", "goldman", "morgan stanley", "j.p. morgan", "jpmorgan",
-                 "citigroup", "citi ", "bofa", "merrill", "deutsche", "rbc", "ubs",
-                 "jefferies", "cantor", "wells fargo", "macquarie", "william blair",
-                 "blair", "btg pactual", "evercore", "piper", "cowen", "stifel",
-                 "needham", "raymond james", "truist", "keybanc", "baird",
-                 "guggenheim", "mizuho", "nomura", "ing ", "td securities")
-
-
-def extract_backers(text: str, company: str = "") -> list[str]:
-    """Named institutional holders (pre-IPO investors) from the principal-
-    stockholders section. Conservative by design: clean names or nothing, never
-    underwriters or the company itself."""
-    sect = _section(text, (r"principal and selling stockholders",
-                           r"principal stockholders", r"selling stockholders",
-                           r"security ownership"))
-    if not sect:
-        return []
-    stem = company.split()[0].lower() if company else ""
-    names, seen = [], set()
-    for m in _BACKER.finditer(sect):
-        nm = _BACKER_STOP.sub("", re.sub(r"\s+", " ", m.group(1)).strip(" ,.")).strip()
-        low = nm.lower()
-        if (len(nm) <= 5 or low in seen or _TITLEISH.search(nm)
-                or (stem and stem in low) or any(u in low for u in _UNDERWRITERS)):
-            continue
-        seen.add(low)
-        names.append(nm)
-    return names[:4]
-
-
 _SCALE = {"thousand": 1e3, "thousands": 1e3, "million": 1e6, "millions": 1e6,
           "billion": 1e9, "billions": 1e9}
 
@@ -657,7 +620,6 @@ def build_profile(ticker: str, name: str, price: float | None,
     p.ceo_credential = lead["credential"]
     p.employees = extract_employees(flat)
     p.use_of_proceeds = extract_use_of_proceeds(flat)
-    p.backers = extract_backers(flat, name)
 
     fin = extract_financials(flat, p.foreign, fy_max)
     p.revenue = fin["revenue"]

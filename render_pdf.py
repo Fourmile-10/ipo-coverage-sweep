@@ -143,8 +143,7 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
             ]
             for label, key in (("What it does", "business"),
                                ("Leadership", "leadership"),
-                               ("Use of proceeds", "use_of_proceeds"),
-                               ("Backers", "backers")):
+                               ("Use of proceeds", "use_of_proceeds")):
                 block.append(Paragraph(
                     f'<b><font color="#1F3864">{label}:</font></b> {_e(c[key])}', st["body"]))
             if c.get("external"):
