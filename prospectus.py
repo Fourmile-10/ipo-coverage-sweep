@@ -59,6 +59,7 @@ class Profile:
     employees: str = ""
     use_of_proceeds: str = ""
     backers: list[str] = field(default_factory=list)
+    external_color: str = ""   # optional web-search context (tagged external)
     # financials
     revenue: float | None = None
     revenue_period: str = ""

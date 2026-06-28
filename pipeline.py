@@ -14,6 +14,7 @@ from datetime import date
 import classify
 import config
 import edgar_source as edgar
+import enrich_web
 import prospectus as prospectus
 import sa_source as sa
 from runlog import RunLog
@@ -64,9 +65,21 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
         else:
             continue                              # genuinely small domestic deal, drop
 
+        # Optional external context (no-op unless web enrichment is configured).
+        if config.WEB_ENRICH:
+            try:
+                color = enrich_web.enrich(prof)
+                if color:
+                    prof.external_color = color
+            except Exception as exc:
+                log.error(f"web enrichment failed for {ipo.ticker}: {exc}")
+
         ipo.flags.extend(prof.flags)
         kept.append(ipo)
 
+    if config.WEB_ENRICH:
+        log.counts["priced_web_enriched"] = sum(
+            1 for i in kept if getattr(i.profile, "external_color", ""))
     log.counts["priced_over_100m"] = len(kept)
     log.counts["priced_profiled"] = len(kept)   # every priced name now gets a card
     log.counts["priced_via_424b4"] = sum(1 for i in kept if (i.profile.source_form or "").startswith("424"))

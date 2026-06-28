@@ -147,6 +147,10 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
                                ("Backers", "backers")):
                 block.append(Paragraph(
                     f'<b><font color="#1F3864">{label}:</font></b> {_e(c[key])}', st["body"]))
+            if c.get("external"):
+                block.append(Paragraph(
+                    f'<b><font color="#1F3864">Context (external):</font></b> '
+                    f'<i>{_e(c["external"])}</i>', st["body"]))
             block.append(Paragraph(f"Source: {_e(c['source'])}", st["small"]))
             story.append(KeepTogether(block))
             story.append(HRFlowable(width="100%", thickness=0.4, spaceBefore=9,

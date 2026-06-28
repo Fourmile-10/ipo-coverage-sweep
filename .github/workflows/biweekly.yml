@@ -39,6 +39,10 @@ jobs:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           SHAREPOINT_DEST: ${{ secrets.SHAREPOINT_DEST }}
           BIWEEKLY_PARITY: ${{ vars.BIWEEKLY_PARITY }}
+          # Optional web-search enrichment (leave unset to keep it off).
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ENRICH_MODEL: ${{ vars.ENRICH_MODEL }}
           CHANNEL_OVERRIDE: ${{ inputs.channel_id }}
           WINDOW_END: ${{ inputs.window_end }}
         run: |

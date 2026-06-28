@@ -22,6 +22,13 @@ SEC_USER_AGENT = os.environ.get(
 # Optional: a local/OneDrive folder the rendered PDF is copied into for archive.
 SHAREPOINT_DEST = os.environ.get("SHAREPOINT_DEST", "")
 
+# Optional web-search enrichment (one external-context line per priced name).
+# Disabled unless BOTH keys are present; the run is identical without them.
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ENRICH_MODEL = os.environ.get("ENRICH_MODEL") or "claude-haiku-4-5-20251001"
+WEB_ENRICH = bool(BRAVE_API_KEY and ANTHROPIC_API_KEY)
+
 # --- Window ----------------------------------------------------------------
 WINDOW_DAYS = 14  # trailing days, inclusive of the run date
 SYDNEY_TZ = ZoneInfo("Australia/Sydney")

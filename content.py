@@ -166,6 +166,7 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
         "financials": _financials_line(p),
         "backers": (", ".join(p.backers) if (p and p.backers) else NOT_DISCLOSED),
         "use_of_proceeds": (p.use_of_proceeds if (p and p.use_of_proceeds) else NOT_DISCLOSED),
+        "external": (p.external_color if (p and p.external_color) else ""),
         "source": src,
     }
 
@@ -286,15 +287,18 @@ def slack_section_b_standouts(filed: FiledResult) -> str:
 def profile_text(ipo: sa.PricedIPO) -> str:
     """Plain-text card for the PDF-failure fallback path."""
     c = priced_card(ipo)
-    return "\n".join([
+    lines = [
         f"*{c['header']}*  {c['subtitle']}",
         f"  What it does: {c['business']}",
         f"  Leadership: {c['leadership']}",
         f"  Financials: {c['financials']}",
         f"  Use of proceeds: {c['use_of_proceeds']}",
         f"  Backers: {c['backers']}",
-        f"  Source: {c['source']}",
-    ])
+    ]
+    if c.get("external"):
+        lines.append(f"  Context (external): {c['external']}")
+    lines.append(f"  Source: {c['source']}")
+    return "\n".join(lines)
 
 
 def section_b_text(filed: FiledResult) -> str:
