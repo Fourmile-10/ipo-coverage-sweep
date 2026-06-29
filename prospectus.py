@@ -422,6 +422,16 @@ def extract_offering(text: str, price: float | None) -> dict:
         if pm:
             out["post_offering_shares"] = _num(pm.group(1))
             break
+    # Offer price from the cover when the calendar did not supply one (used for
+    # off-calendar 424B4 names found via the cross-check).
+    if out["price"] is None:
+        pm = (re.search(r"(?:initial public offering price (?:is |of )?|"
+                        r"public offering price of|price to (?:the )?public of|"
+                        r"at a price of)\s*\$?\s*([\d]+(?:\.\d{1,2})?)", head, re.I)
+              or re.search(r"\$\s*([\d]+(?:\.\d{1,2})?)\s+per\s+"
+                           r"(?:share|ADS|American Depositary Share|ordinary share)", head, re.I))
+        if pm:
+            out["price"] = _num(pm.group(1))
     if out["price"] and out["shares_offered"]:
         out["gross_proceeds"] = out["price"] * out["shares_offered"]
     return out
@@ -636,32 +646,17 @@ def filer_detail(cik: str, filename: str, form: str, foreign: bool, name: str,
     return out
 
 
-def build_profile(ticker: str, name: str, price: float | None,
-                  foreign: bool = False, fy_max: int | None = None) -> Profile:
-    p = Profile(ticker=ticker, name=name, price=price, foreign=foreign)
-    info = resolve_filing(ticker, name)
-    if not info:
-        p.notes.append("No prospectus found on EDGAR.")
-        return p
-    p.cik, p.source_form, p.accession = info["cik"], info["form"], info["accession"]
-    p.doc_url = info["doc_url"]
-    # Foreign status from the actual form (F-1 family), not a name guess.
-    p.foreign = info["form"].startswith("F-") or foreign
-    p.resolved = True
-    try:
-        text = html_to_text(httpclient.get(p.doc_url, sec=True).text)
-    except Exception as exc:
-        p.notes.append(f"Prospectus fetch failed: {exc}")
-        return p
-    flat = re.sub(r"\s+", " ", text)
-
+def _populate(p: Profile, flat: str, price: float | None, fy_max: int | None) -> Profile:
+    """Fill a resolved Profile from the flattened prospectus text."""
     off = extract_offering(flat, price)
     p.exchange = off["exchange"]
     p.shares_offered = off["shares_offered"]
     p.gross_proceeds = off["gross_proceeds"]
     p.post_offering_shares = off["post_offering_shares"]
+    if p.price is None and off.get("price") is not None:
+        p.price = off["price"]
 
-    p.business = extract_business(name, flat)
+    p.business = extract_business(p.name, flat)
     lead = extract_leadership(flat)
     p.ceo_name = lead["ceo"]
     p.cfo_name = lead["cfo"]
@@ -682,3 +677,53 @@ def build_profile(ticker: str, name: str, price: float | None,
     p.revenue_kind = fin["revenue_kind"]
     p.is_bank = fin["is_bank"]
     return _finalize(p)
+
+
+def build_profile(ticker: str, name: str, price: float | None,
+                  foreign: bool = False, fy_max: int | None = None) -> Profile:
+    p = Profile(ticker=ticker, name=name, price=price, foreign=foreign)
+    info = resolve_filing(ticker, name)
+    if not info:
+        p.notes.append("No prospectus found on EDGAR.")
+        return p
+    p.cik, p.source_form, p.accession = info["cik"], info["form"], info["accession"]
+    p.doc_url = info["doc_url"]
+    # Foreign status from the actual form (F-1 family), not a name guess.
+    p.foreign = info["form"].startswith("F-") or foreign
+    p.resolved = True
+    try:
+        flat = re.sub(r"\s+", " ", html_to_text(httpclient.get(p.doc_url, sec=True).text))
+    except Exception as exc:
+        p.notes.append(f"Prospectus fetch failed: {exc}")
+        return p
+    return _populate(p, flat, price, fy_max)
+
+
+def build_from_filing(cik: str, name: str, filename: str, form: str = "424B4",
+                      fy_max: int | None = None) -> Profile:
+    """Build a profile directly from a known filing (no ticker lookup). Used for
+    the 424B4 cross-check, where the issuer was not on the IPO calendar."""
+    p = Profile(ticker="", name=name)
+    base = edgar._accession_dir(cik, filename)
+    if not base:
+        p.notes.append("No accession directory.")
+        return p
+    try:
+        idx = httpclient.get_json(f"{base}/index.json", sec=True)
+    except Exception as exc:
+        p.notes.append(f"index fetch failed: {exc}")
+        return p
+    doc = edgar._primary_doc(idx.get("directory", {}).get("item", []), form)
+    if not doc:
+        p.notes.append("No primary document.")
+        return p
+    m = re.search(r"(\d{10}-\d{2}-\d{6})", filename)
+    p.cik, p.source_form, p.accession = edgar.cik10(cik), form, (m.group(1) if m else "")
+    p.doc_url = f"{base}/{doc}"
+    p.resolved = True
+    try:
+        flat = re.sub(r"\s+", " ", html_to_text(httpclient.get(p.doc_url, sec=True).text))
+    except Exception as exc:
+        p.notes.append(f"Prospectus fetch failed: {exc}")
+        return p
+    return _populate(p, flat, None, fy_max)

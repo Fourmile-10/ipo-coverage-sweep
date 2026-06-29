@@ -64,13 +64,16 @@ def _qtr(d: date) -> int:
     return (d.month - 1) // 3 + 1
 
 
-def fetch_index_filings(window_start: date, window_end: date) -> tuple[list[IndexFiling], int, int]:
-    """Pull every S-1/F-1 (and /A) filing across the window from daily indexes.
+def fetch_index_filings(window_start: date, window_end: date,
+                        forms: set | None = None) -> tuple[list[IndexFiling], int, int]:
+    """Pull every filing of the given form types across the window from daily
+    indexes (default: the S-1/F-1 registration family).
 
     Returns (filings, days_fetched, days_missing). A missing day (404) is benign
     (weekend/holiday) and counted, not raised. The caller fails loud only if no
     day in the window returned an index at all.
     """
+    wanted = forms if forms is not None else config.FILING_FORMS
     filings: list[IndexFiling] = []
     days_fetched = days_missing = 0
     d = window_start
@@ -89,7 +92,7 @@ def fetch_index_filings(window_start: date, window_end: date) -> tuple[list[Inde
             if len(parts) != 5:
                 continue
             cik, company, form, date_filed, filename = parts
-            if form.strip() in config.FILING_FORMS:
+            if form.strip() in wanted:
                 filings.append(
                     IndexFiling(cik.strip(), company.strip(), form.strip(),
                                 date_filed.strip(), filename.strip())

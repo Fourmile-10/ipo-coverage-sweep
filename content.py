@@ -88,7 +88,9 @@ def _rev_value(p) -> str:
 
 
 def priced_header(ipo: sa.PricedIPO) -> str:
-    return f"{short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker})"
+    if ipo.ticker:
+        return f"{short_name(ipo.name)} ({_exch(ipo)}: {ipo.ticker})"
+    return f"{short_name(ipo.name)} ({_exch(ipo)})"
 
 
 def card_subtitle(ipo: sa.PricedIPO) -> str:
@@ -206,7 +208,7 @@ SUMMARY_COLUMNS = ["Company", "Priced", "Price", "Raise", "Impl. val", "Revenue"
 def summary_row(ipo: sa.PricedIPO) -> list[str]:
     p = ipo.profile
     return [
-        f"{short_name(ipo.name)} ({ipo.ticker})",
+        f"{short_name(ipo.name)} ({ipo.ticker})" if ipo.ticker else short_name(ipo.name),
         pretty_date(ipo.ipo_date),
         _price_s(ipo),
         _m(p and p.gross_proceeds),

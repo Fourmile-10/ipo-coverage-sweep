@@ -27,6 +27,92 @@ class PricedResult:
     profiled: list[sa.PricedIPO]
 
 
+def _passes_size_gate(ipo: sa.PricedIPO, prof) -> bool:
+    """Keep if raise, filing-implied valuation, OR current market cap clears
+    $100M (market cap is gate-only, never printed). Foreign or all-unknown sizes
+    are kept and flagged rather than dropped."""
+    size = max(prof.gross_proceeds or 0, prof.impl_valuation or 0, ipo.market_cap or 0)
+    if size >= config.MIN_DEAL_SIZE:
+        return True
+    if prof.foreign or size == 0:
+        ipo.flags.append("size-unverified")
+        return True
+    return False                              # genuinely small domestic deal
+
+
+def _web_enrich(prof, log: RunLog, ident: str) -> None:
+    """Optional web enrichment (no-op unless configured): CEO prior career +
+    one external-context line."""
+    if not config.WEB_ENRICH:
+        return
+    try:
+        if not prof.ceo_prior:
+            bg = enrich_web.ceo_background(prof)
+            if bg:
+                prof.ceo_prior = bg
+                prof.ceo_prior_source = "web"
+        color = enrich_web.enrich(prof)
+        if color:
+            prof.external_color = color
+    except Exception as exc:
+        log.error(f"web enrichment failed for {ident}: {exc}")
+
+
+def _crosscheck_424b4(window_start: date, window_end: date,
+                      seen_ciks: set, log: RunLog) -> list[sa.PricedIPO]:
+    """Reconcile EDGAR 424B4 (final IPO prospectus) filings against the calendar.
+
+    Any genuine new issuer with a 424B4 in the window that the IPO calendar did
+    not surface is added, flagged 'off-calendar'. Follow-on offerings (issuers
+    with prior periodic reporting) and SPACs/funds are excluded.
+    """
+    out: list[sa.PricedIPO] = []
+    try:
+        filings, _, _ = edgar.fetch_index_filings(window_start, window_end, forms={"424B4"})
+    except Exception as exc:
+        log.error(f"424B4 cross-check failed: {exc}")
+        return out
+
+    by_cik: dict[str, edgar.IndexFiling] = {}
+    for f in filings:
+        by_cik.setdefault(edgar.cik10(f.cik), f)
+    rev_ticker = {v: k for k, v in edgar._load_ticker_map().items()}
+
+    added = 0
+    for cik, f in by_cik.items():
+        if cik in seen_ciks:
+            continue
+        try:
+            sub = edgar.get_submissions(cik)
+        except Exception:
+            continue
+        keep, _reason = edgar.is_genuine_new_filer(cik, "424B4", sub)
+        if not keep:                          # follow-on / SPAC / fund
+            continue
+        prof = prospectus.build_from_filing(cik, sub.get("name") or f.company,
+                                            f.filename, "424B4", window_end.year)
+        if not prof.resolved:
+            continue
+        has_ops = bool((prof.revenue and prof.revenue > 1_000_000) or prof.employees)
+        if not has_ops and classify.is_spac_weak(prof.name, text=prof.business):
+            continue
+        size = max(prof.gross_proceeds or 0, prof.impl_valuation or 0)
+        if 0 < size < config.MIN_DEAL_SIZE and not prof.foreign:
+            continue
+        ipo = sa.PricedIPO(ticker=rev_ticker.get(cik, ""), name=prof.name,
+                           ipo_date=_iso(f.date_filed), ipo_price=prof.price)
+        ipo.profile = prof
+        ipo.flags.append("off-calendar")
+        ipo.flags.extend(prof.flags)
+        _web_enrich(prof, log, ipo.ticker or cik)
+        out.append(ipo)
+        added += 1
+        if added >= 25:                       # safety cap
+            break
+    log.counts["priced_off_calendar"] = added
+    return out
+
+
 def build_section_a(window_start: date, window_end: date, log: RunLog) -> PricedResult:
     rows = sa.fetch_recent_priced()           # raises on failure -> fail loud
     log.source("stockanalysis priced calendar", ok=True, count=len(rows))
@@ -41,6 +127,7 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
                   if not classify.is_spac_strong(r.name) and not classify.is_fund(r.name)]
 
     kept: list[sa.PricedIPO] = []
+    seen_ciks: set[str] = set()
     for ipo in candidates:
         sa.enrich(ipo)                       # sector/exchange + market cap (gate)
 
@@ -48,6 +135,8 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
         prof = prospectus.build_profile(ipo.ticker, ipo.name, ipo.ipo_price,
                                         fy_max=window_end.year)
         ipo.profile = prof
+        if prof.cik:
+            seen_ciks.add(prof.cik)          # so the 424B4 cross-check won't re-add
         if not prof.resolved:
             ipo.flags.append("no-prospectus")
 
@@ -58,35 +147,16 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
                 ipo.name, text=f"{prof.business or ''} {ipo.description or ''}"):
             continue
 
-        # Size gate: keep if the raise, the filing-implied valuation, OR the
-        # current market cap clears $100M (a small raise on a large company still
-        # counts). The market cap is a gate-only cross-check (never printed) so a
-        # failed valuation parse cannot wrongly drop a genuinely large name.
-        size = max(prof.gross_proceeds or 0, prof.impl_valuation or 0, ipo.market_cap or 0)
-        if size >= config.MIN_DEAL_SIZE:
-            pass                                  # clears the line, keep
-        elif prof.foreign or size == 0:
-            ipo.flags.append("size-unverified")   # keep; foreign val not computed, or nothing known
-        else:
-            continue                              # genuinely small domestic deal, drop
+        if not _passes_size_gate(ipo, prof):
+            continue
 
-        # Optional web enrichment (no-op unless configured): fill the CEO's
-        # prior career when the filing did not, and add a context line.
-        if config.WEB_ENRICH:
-            try:
-                if not prof.ceo_prior:
-                    bg = enrich_web.ceo_background(prof)
-                    if bg:
-                        prof.ceo_prior = bg
-                        prof.ceo_prior_source = "web"
-                color = enrich_web.enrich(prof)
-                if color:
-                    prof.external_color = color
-            except Exception as exc:
-                log.error(f"web enrichment failed for {ipo.ticker}: {exc}")
-
+        _web_enrich(prof, log, ipo.ticker)
         ipo.flags.extend(prof.flags)
         kept.append(ipo)
+
+    # Second priced source: catch a priced IPO (424B4 on EDGAR) that the
+    # calendar feed missed entirely.
+    kept.extend(_crosscheck_424b4(window_start, window_end, seen_ciks, log))
 
     if config.WEB_ENRICH:
         log.counts["priced_web_enriched"] = sum(
