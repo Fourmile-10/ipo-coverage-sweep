@@ -1,6 +1,6 @@
 """Decade-branded PDF for the IPO sweep.
 
-Navy #1F3864 headings, mid-blue #2E5F9E accents, Arial (Helvetica fallback on
+Deep teal-green #0E4640 headings, teal #2F8F7F accents, white, Arial (Helvetica fallback on
 runners without the Arial TTF), US Letter, running header/footer with run date
 and page numbers. The caller treats any exception here as non-fatal and falls
 back to posting the findings as text.
@@ -25,9 +25,9 @@ from reportlab.platypus import (
 
 import content
 
-NAVY = colors.HexColor("#1F3864")
-MIDBLUE = colors.HexColor("#2E5F9E")
-LIGHT = colors.HexColor("#EAEFF7")
+NAVY = colors.HexColor("#0E4640")     # primary: deep teal-green
+MIDBLUE = colors.HexColor("#2F8F7F")  # accent: teal
+LIGHT = colors.HexColor("#E7F2EF")    # pale teal tint
 GREY = colors.HexColor("#555555")
 
 _BASE, _BOLD = "Helvetica", "Helvetica-Bold"
@@ -100,7 +100,7 @@ def _header_footer(run_date: date):
         w, h = letter
         canvas.setFillColor(NAVY)
         canvas.setFont(_BOLD, 9)
-        canvas.drawString(0.75 * inch, h - 0.55 * inch, "Decade Partners | Primary Research")
+        canvas.drawString(0.75 * inch, h - 0.55 * inch, "Decade Partners")
         canvas.setStrokeColor(MIDBLUE)
         canvas.setLineWidth(0.75)
         canvas.line(0.75 * inch, h - 0.62 * inch, w - 0.75 * inch, h - 0.62 * inch)
@@ -147,13 +147,13 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
                 Paragraph(name_html, st["cardtitle"]),
                 Paragraph(_e(c["subtitle"]), st["cardsub"]),
                 Paragraph(_e(c["business"]), st["bodyj"]),
-                Paragraph(f'<b><font color="#1F3864">Leadership.</font></b> '
+                Paragraph(f'<b><font color="#0E4640">Leadership.</font></b> '
                           f'{_e(c["leadership"])}', st["bodyj"]),
-                Paragraph(f'<b><font color="#1F3864">Use of proceeds.</font></b> '
+                Paragraph(f'<b><font color="#0E4640">Use of proceeds.</font></b> '
                           f'{_e(c["use_of_proceeds"])}', st["bodyj"]),
             ]
             if c.get("external"):
-                left.append(Paragraph(f'<b><font color="#1F3864">Context.</font></b> '
+                left.append(Paragraph(f'<b><font color="#0E4640">Context.</font></b> '
                                       f'<i>{_e(c["external"])}</i>', st["bodyj"]))
             panel = _stats_panel(c["deal_stats"], c["fin_stats"], st, 2.45 * inch)
             card = Table([[left, panel]], colWidths=[4.35 * inch, 2.55 * inch])
@@ -170,7 +170,7 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
                 Paragraph(f"Source: {_e(c['source'])}", st["small"]),
             ]))
             story.append(HRFlowable(width="100%", thickness=0.4, spaceBefore=10,
-                                    spaceAfter=10, color=colors.HexColor("#D7DEEC")))
+                                    spaceAfter=10, color=colors.HexColor("#B9D8D0")))
 
     # --- Section B ---
     story.append(Paragraph("Section B. Newly filed (in registration)", st["h1"]))
@@ -209,7 +209,7 @@ def _summary_table(ipos, st):
     t = Table(rows, colWidths=widths, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6E8")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B9D8D0")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
@@ -242,7 +242,7 @@ def _stats_panel(deal, fin, st, width):
     t = Table(data, colWidths=[width * 0.55, width * 0.45])
     cmds = [
         ("BACKGROUND", (0, 0), (-1, -1), LIGHT),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#C3CFE6")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B9D8D0")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 7),
         ("RIGHTPADDING", (0, 0), (-1, -1), 7),
@@ -252,7 +252,7 @@ def _stats_panel(deal, fin, st, width):
     for r in hdr_rows:
         cmds += [("SPAN", (0, r), (1, r)),
                  ("TOPPADDING", (0, r), (1, r), 5 if r else 3),
-                 ("LINEBELOW", (0, r), (1, r), 0.4, colors.HexColor("#C3CFE6"))]
+                 ("LINEBELOW", (0, r), (1, r), 0.4, colors.HexColor("#B9D8D0"))]
     t.setStyle(TableStyle(cmds))
     return t
 
@@ -269,7 +269,7 @@ def _filer_table(title, filers, st):
     t = Table(rows, colWidths=widths, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6E8")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B9D8D0")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
