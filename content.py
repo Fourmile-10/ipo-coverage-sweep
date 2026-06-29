@@ -40,11 +40,12 @@ def _m(v) -> str:
     if v is None:
         return "n/d"
     a = abs(v)
+    sign = "-" if v < 0 else ""
     if a >= 1e9:
-        return f"${v / 1e9:.2f}B"
+        return f"{sign}${a / 1e9:.2f}B"
     if a >= 1e6:
-        return f"${v / 1e6:.1f}M"
-    return f"${v:,.0f}"
+        return f"{sign}${a / 1e6:.1f}M"
+    return f"{sign}${a:,.0f}"
 
 
 def _price_s(ipo: sa.PricedIPO) -> str:
@@ -182,6 +183,52 @@ def _financials_line(p) -> str:
     return "; ".join(bits)
 
 
+def _fin_sentence(p) -> str:
+    """A short financials clause woven into the description prose."""
+    if not p:
+        return ""
+    if p.pre_revenue and p.revenue is None:
+        if p.net_income is not None:
+            return f"Pre-revenue, with a net loss of {_m(abs(p.net_income))}."
+        return "Pre-revenue."
+    if p.revenue is None:
+        return ""
+    label = "interest income" if p.is_bank else "revenue"
+    us = " (US$ equiv.)" if (p.revenue_kind or "").startswith("revenue (US$") else ""
+    lead = (f"{p.revenue_period} " if p.revenue_period else "") + \
+        f"{label} {_m(p.revenue)}{us}"
+    if p.yoy_growth is not None:
+        lead += f", up {p.yoy_growth:.0f}%" if p.yoy_growth >= 0 else f", down {abs(p.yoy_growth):.0f}%"
+    extra = []
+    if p.gross_margin is not None:
+        extra.append(f"{p.gross_margin:.0f}% gross margin")
+    if p.net_income is not None:
+        seg = f"net income {_m(p.net_income)}"
+        if p.net_margin is not None:
+            seg += f" ({p.net_margin:+.0f}% margin)"
+        extra.append(seg)
+    s = lead + ("; " + "; ".join(extra) if extra else "")
+    return s[0].upper() + s[1:] + "."
+
+
+def business_paragraph(ipo: sa.PricedIPO) -> str:
+    """Description in the house style: founding, what it does, and the headline
+    financials woven into the prose."""
+    p = ipo.profile
+    parts = []
+    if p and p.founder_year:
+        founded = f"Founded {p.founder_year}"
+        if p.hq:
+            founded += f" in {p.hq}"
+        parts.append(founded + ".")
+    biz = (p.business if (p and p.business) else NOT_DISCLOSED)
+    parts.append(biz if biz.endswith((".", "!", "?")) else biz + ".")
+    fin = _fin_sentence(p)
+    if fin:
+        parts.append(fin)
+    return " ".join(parts)
+
+
 def priced_card(ipo: sa.PricedIPO) -> dict:
     p = ipo.profile
     src = f"{p.source_form} {p.accession}" if (p and p.resolved) else "no EDGAR prospectus found"
@@ -193,7 +240,7 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
         "subtitle": card_subtitle(ipo),
         "deal_stats": deal_stats(ipo),
         "fin_stats": fin_stats(ipo),
-        "business": (p.business if (p and p.business) else NOT_DISCLOSED),
+        "business": business_paragraph(ipo),
         "leadership": _leadership_line(p),
         "financials": _financials_line(p),
         "external": (p.external_color if (p and p.external_color) else ""),

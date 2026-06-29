@@ -58,6 +58,7 @@ class Profile:
     ceo_prior_source: str = "filing"   # "filing" or "web"
     cfo_name: str = ""
     founders: list[str] = field(default_factory=list)
+    hq: str = ""               # headquarters location
     employees: str = ""
     external_color: str = ""   # optional web-search context (tagged external)
     # financials
@@ -393,6 +394,24 @@ def _ceo_career(flat: str, ceo: str) -> tuple[str, str]:
     return tenure, prior
 
 
+_STREET = re.compile(r"\b(?:St|Street|Ave|Avenue|Road|Rd|Drive|Dr|Court|Ct|Suite|"
+                     r"Ste|Floor|Fl|Lane|Ln|Blvd|Boulevard|Way|Plaza|Parkway|No)\b\.?", re.I)
+
+
+def extract_hq(flat: str) -> str:
+    # Only the company's own "principal executive offices" line, and only a clean
+    # "City, ST" within it (a 2-letter state). This avoids a third party's
+    # "headquartered in X" elsewhere and street-address fragments. Foreign HQs
+    # (no US state) simply return "" rather than risk a wrong place.
+    m = re.search(r"principal executive offices[^.]{0,170}", flat, re.I)
+    scope = m.group(0) if m else ""
+    for cm in re.finditer(r"([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2}),\s+([A-Z]{2})\b", scope):
+        city = cm.group(1).strip()
+        if not _STREET.search(city):
+            return f"{city}, {cm.group(2)}"
+    return ""
+
+
 def extract_employees(text: str) -> str:
     m = re.search(r"we had\s+(?:approximately\s+)?([\d,]+)\s+(?:full-time\s+)?employees", text, re.I)
     if not m:
@@ -665,6 +684,7 @@ def _populate(p: Profile, flat: str, price: float | None, fy_max: int | None) ->
     p.founders = lead["founders"]
     p.ceo_tenure = lead["tenure"]
     p.ceo_prior = lead["prior"]
+    p.hq = extract_hq(flat)
     p.employees = extract_employees(flat)
 
     fin = extract_financials(flat, p.foreign, fy_max)
