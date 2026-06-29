@@ -65,9 +65,15 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
         else:
             continue                              # genuinely small domestic deal, drop
 
-        # Optional external context (no-op unless web enrichment is configured).
+        # Optional web enrichment (no-op unless configured): fill the CEO's
+        # prior career when the filing did not, and add a context line.
         if config.WEB_ENRICH:
             try:
+                if not prof.ceo_prior:
+                    bg = enrich_web.ceo_background(prof)
+                    if bg:
+                        prof.ceo_prior = bg
+                        prof.ceo_prior_source = "web"
                 color = enrich_web.enrich(prof)
                 if color:
                     prof.external_color = color

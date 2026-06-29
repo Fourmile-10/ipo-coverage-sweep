@@ -28,6 +28,16 @@ _SYSTEM = (
 )
 
 
+_CEO_SYSTEM = (
+    "You are a research assistant for an investment firm. Given web snippets "
+    "about a company's CEO, write a SHORT phrase (max ~20 words) of their prior "
+    "career: notable past companies and roles, or founder status. Rules: only "
+    "facts in the snippets; no speculation; no hype; no em-dashes; do not repeat "
+    "their current company. Form like 'former VP of Payments at Stripe; "
+    "co-founded Acme'. If the snippets give nothing reliable, output exactly NONE."
+)
+
+
 def _brave_snippets(query: str, count: int = 6) -> list[tuple[str, str]]:
     resp = requests.get(
         BRAVE_URL,
@@ -79,3 +89,38 @@ def enrich(profile) -> str | None:
     if not text or text.upper().startswith("NONE"):
         return None
     return text
+
+
+def ceo_background(profile) -> str | None:
+    """Return a short prior-career phrase for the CEO, or None.
+
+    Fallback for when the prospectus bio did not yield a clean prior-career line.
+    """
+    if not config.WEB_ENRICH or not profile or not profile.ceo_name:
+        return None
+    query = f"{profile.ceo_name} {profile.name} CEO career background previously"
+    try:
+        snippets = _brave_snippets(query)
+    except Exception:
+        return None
+    if not snippets:
+        return None
+    context = "\n".join(f"- {t}: {d}" for t, d in snippets if (t or d))
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.ENRICH_MODEL,
+            max_tokens=80,
+            system=_CEO_SYSTEM,
+            messages=[{"role": "user", "content": (
+                f"CEO: {profile.ceo_name}\nCompany: {profile.name}\n\n"
+                f"Snippets:\n{context}\n\nWrite the short prior-career phrase, or NONE."
+            )}],
+        )
+        text = "".join(getattr(b, "text", "") for b in msg.content).strip()
+    except Exception:
+        return None
+    if not text or text.upper().startswith("NONE"):
+        return None
+    return text[:160]

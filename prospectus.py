@@ -53,7 +53,9 @@ class Profile:
     ceo_name: str = ""
     is_founder: bool | None = None
     founder_year: str = ""
-    ceo_credential: str = ""
+    ceo_tenure: str = ""       # e.g. "March 2020" (when they became CEO)
+    ceo_prior: str = ""        # prior-career snippet from the bio
+    ceo_prior_source: str = "filing"   # "filing" or "web"
     cfo_name: str = ""
     founders: list[str] = field(default_factory=list)
     employees: str = ""
@@ -335,15 +337,61 @@ def extract_leadership(flat: str) -> dict:
             elif re.search(r"\bfounder\b", flat, re.I):
                 is_founder = None
 
-    credential = ""
-    if ceo:
-        last = re.escape(ceo.split()[-1])
-        cm = re.search(last + r"[^.]{0,300}?(former(?:ly)?[^.]{6,90}|previously[^.]{6,90}"
-                       r"|prior to[^.]{6,90}|served as[^.]{6,90})", flat, re.I)
-        if cm:
-            credential = re.sub(r"\s+", " ", cm.group(1)).strip().rstrip(",")[:100]
+    tenure, prior = _ceo_career(flat, ceo) if ceo else ("", "")
     return {"ceo": ceo, "cfo": cfo, "is_founder": is_founder,
-            "founder_year": founder_year, "founders": founders, "credential": credential}
+            "founder_year": founder_year, "founders": founders,
+            "tenure": tenure, "prior": prior}
+
+
+# A prior-career sentence in a CEO bio, e.g. "Prior to joining the Company,
+# Mr. X served as Chief Operating Officer of WElink Energy ...".
+_PRIOR_SENT = re.compile(
+    r"(?:Prior to joining|Prior to|Before joining|Earlier in (?:his|her) career|"
+    r"Previously|also served|previously served)[^.]{15,220}\.", re.I)
+_PRIOR_HEAD = re.compile(
+    r"^(?:also\s+|previously\s+)?(?:Prior to joining the Company,?|Prior to[^,]*,|"
+    r"Before joining[^,]*,|Earlier in (?:his|her) career,|Previously,?)?\s*"
+    r"(?:Mr\.|Ms\.|Dr\.|Mrs\.)?\s*(?:[A-Z][a-z]+\s+)?"
+    r"(?:also\s+)?(?:served\s+(?:as|in)\s+(?:the\s+)?|founded\s+|was\s+(?:the\s+)?)?",
+    re.I)
+
+
+def _ceo_career(flat: str, ceo: str) -> tuple[str, str]:
+    """Return (tenure, prior) for the CEO from the Management-section bio.
+
+    Prior career is a cleaned, trimmed sentence (reads naturally); only kept if
+    it names a role and a company-like proper noun, else '' (web fallback fills).
+    """
+    last = re.escape(ceo.split()[-1])
+    bio = flat
+    for m in re.finditer(r"(?:Mr\.|Ms\.|Dr\.|Mrs\.)?\s*" + last
+                         + r"\s+(?:has |currently )?(?:serves|served|founded|co-founded)", flat):
+        bio = flat[m.start(): m.start() + 800]
+        break
+
+    tenure = ""
+    tm = re.search(r"(?:serves|served|has served|has held|been)[^.]{0,110}?"
+                   r"since\s+((?:[A-Z][a-z]+,?\s+)?\d{4})", bio, re.I)
+    if tm:
+        tenure = tm.group(1).strip().rstrip(",")
+
+    prior = ""
+    for pm in _PRIOR_SENT.finditer(bio):
+        s = pm.group(0)
+        if not re.search(r"officer|president|director|founder|chairman|partner|"
+                         r"head of|advisor|managing", s, re.I):
+            continue
+        s = _PRIOR_HEAD.sub("", s).strip()
+        s = re.sub(r"^(?:as|a|an|the)\s+", "", s, flags=re.I)
+        s = re.sub(r"^(?:held |assumed )?(?:the )?role of\s+", "", s, flags=re.I)
+        s = re.split(r",\s+(?:where|which|a global|the parent|responsible)", s)[0]
+        s = re.sub(r"\s+", " ", s).strip().rstrip(".,")
+        if not re.search(r"[A-Z][A-Za-z.&'\-]{2,}", s):   # needs a proper noun (a company)
+            continue
+        s = s[0].upper() + s[1:]
+        prior = s if len(s) <= 130 else s[:130].rsplit(" ", 1)[0]
+        break
+    return tenure, prior
 
 
 def extract_employees(text: str) -> str:
@@ -626,7 +674,8 @@ def build_profile(ticker: str, name: str, price: float | None,
     p.is_founder = lead["is_founder"]
     p.founder_year = lead["founder_year"]
     p.founders = lead["founders"]
-    p.ceo_credential = lead["credential"]
+    p.ceo_tenure = lead["tenure"]
+    p.ceo_prior = lead["prior"]
     p.employees = extract_employees(flat)
     p.use_of_proceeds = extract_use_of_proceeds(flat)
 

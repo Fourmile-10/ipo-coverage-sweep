@@ -113,27 +113,29 @@ def fin_stats(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
 def _leadership_line(p) -> str:
     if not p or not p.ceo_name:
         return f"CEO {NOT_DISCLOSED}"
-    # CEO (+ founder tag).
+    # CEO with founder status or tenure ("how long at the business").
     ceo = f"CEO {p.ceo_name}"
     if p.is_founder is True:
         ceo += " (founder" + (f", {p.founder_year}" if p.founder_year else "") + ")"
+    elif p.ceo_tenure:
+        ceo += f" (CEO since {p.ceo_tenure})"
     lead = [ceo]
     if p.cfo_name:
         lead.append(f"CFO {p.cfo_name}")
     line = "; ".join(lead) + "."
 
     extras = []
-    if p.ceo_credential:
-        cred = p.ceo_credential.rstrip(".")
-        extras.append(cred[0].upper() + cred[1:])
-    # Co-founders other than the CEO.
+    # Prior career ("where else they have been").
+    if p.ceo_prior:
+        prior = p.ceo_prior.rstrip(".")
+        prior = prior[0].upper() + prior[1:]
+        tag = " [web]" if p.ceo_prior_source == "web" else ""
+        extras.append(f"Previously {prior}{tag}")
     others = [f for f in (p.founders or []) if f.lower() != p.ceo_name.lower()]
     if others:
         extras.append("co-founders " + ", ".join(others))
-    elif p.is_founder is not True and p.founder_year:
-        extras.append(f"company founded {p.founder_year}")
     if extras:
-        line += " " + "; ".join(extras) + "."
+        line += " " + ". ".join(extras) + "."
     return line
 
 
