@@ -489,6 +489,12 @@ def extract_financials(flat: str, foreign: bool, fy_max: int | None = None) -> d
             out["net_income"] = -abs(ni_nums[0]) * _scale_before(flat, ni_pos)
         return out
 
+    # A filing that reports in a foreign currency (e.g. RMB) is treated as
+    # foreign for financials even if it priced via a 424 (form looks domestic),
+    # so we never print local currency as USD.
+    if re.search(r"\bRMB\b|Renminbi|\bHK\$|\bHKD\b|\bRMB|¥", flat):
+        foreign = True
+
     # Foreign issuers report in local currency; we only print the US$ equivalent
     # when it is cleanly stated, never the local-currency number. Light touch by
     # design: if a clean US$ figure is not present, leave it "not disclosed"

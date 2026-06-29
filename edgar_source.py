@@ -118,8 +118,10 @@ def is_genuine_new_filer(cik: str, current_form: str, sub: dict) -> tuple[bool, 
     name = sub.get("name") or ""
     sic = f"{sub.get('sic', '')} {sub.get('sicDescription', '')}"
 
-    # Shell / SPAC / fund vehicle by name, prospectus language, or SIC 6770.
-    if classify.is_spac(name, sic=sic):
+    # Shell / SPAC / fund vehicle by strong name tell or SIC 6770 (the reliable
+    # signal for filings); weak name hints alone would drop real "Capital Corp"
+    # lenders, so they are not used here.
+    if classify.is_spac_strong(name, sic=sic):
         return False, "SPAC / blank-check (name or SIC 6770)"
     if classify.is_fund(name):
         return False, "fund/trust vehicle"

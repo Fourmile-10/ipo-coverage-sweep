@@ -33,19 +33,16 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
 
     in_window = [r for r in rows
                  if r.ipo_date and window_start.isoformat() <= r.ipo_date <= window_end.isoformat()]
-    # Drop SPACs / blank-check / funds by name up front (cheap, pre-enrichment).
+    # Drop only HIGH-CONFIDENCE SPACs / funds up front (cheap). Weak SPAC tells
+    # ("Capital Corp", "Equity Partners", blank-check wording) are checked after
+    # the prospectus, with a no-operations rescue, so real financials/asset
+    # managers in-lane are not false-dropped.
     candidates = [r for r in in_window
-                  if not classify.is_spac(r.name) and not classify.is_fund(r.name)]
+                  if not classify.is_spac_strong(r.name) and not classify.is_fund(r.name)]
 
     kept: list[sa.PricedIPO] = []
     for ipo in candidates:
-        sa.enrich(ipo)                       # sector/exchange for lane + fallback
-
-        # Some SPACs only reveal themselves in the prospectus language (e.g.
-        # "Wilco 63 Corporation", a blank-check by description). Drop those now
-        # that enrichment has given us a description.
-        if classify.is_spac(ipo.name, text=ipo.description, sic=ipo.industry):
-            continue
+        sa.enrich(ipo)                       # sector/exchange + market cap (gate)
 
         # The prospectus on EDGAR is the source for everything printed.
         prof = prospectus.build_profile(ipo.ticker, ipo.name, ipo.ipo_price,
@@ -54,10 +51,18 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
         if not prof.resolved:
             ipo.flags.append("no-prospectus")
 
-        # Size gate from the filing: keep if the raise OR the implied valuation
-        # clears $100M (a small raise on a >$100M company still counts). No
-        # scraped market cap. When neither is known, keep and flag.
-        size = max(prof.gross_proceeds or 0, prof.impl_valuation or 0)
+        # Weak SPAC tell + no operations (no revenue, no employees) = a SPAC.
+        # A real operating company is rescued by its revenue/employees.
+        has_ops = bool((prof.revenue and prof.revenue > 1_000_000) or prof.employees)
+        if not has_ops and classify.is_spac_weak(
+                ipo.name, text=f"{prof.business or ''} {ipo.description or ''}"):
+            continue
+
+        # Size gate: keep if the raise, the filing-implied valuation, OR the
+        # current market cap clears $100M (a small raise on a large company still
+        # counts). The market cap is a gate-only cross-check (never printed) so a
+        # failed valuation parse cannot wrongly drop a genuinely large name.
+        size = max(prof.gross_proceeds or 0, prof.impl_valuation or 0, ipo.market_cap or 0)
         if size >= config.MIN_DEAL_SIZE:
             pass                                  # clears the line, keep
         elif prof.foreign or size == 0:

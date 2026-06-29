@@ -22,8 +22,11 @@ _ROMAN = re.compile(
     r"(?:II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV)\b",
     re.I,
 )
-_NAME_HINTS = ("blank check", "capital corp", "equity partners",
-               "acquisition corp", "acquisition company")
+# Strong tells: a real operating company essentially never carries these.
+_STRONG_NAME = ("blank check", "acquisition corp", "acquisition company")
+# Weak tells: also worn by legitimate financials/asset managers, so these only
+# count as SPAC when the issuer also has no operations (no revenue/employees).
+_WEAK_NAME = ("capital corp", "equity partners")
 _BLANK_CHECK_TEXT = (
     "blank check", "business combination", "effecting a merger",
     "initial business combination", "merger, amalgamation",
@@ -31,16 +34,27 @@ _BLANK_CHECK_TEXT = (
 )
 
 
-def is_spac(name: str, text: str = "", sic: str = "") -> bool:
+def is_spac_strong(name: str, sic: str = "") -> bool:
+    """High-confidence SPAC by name or SIC 6770; safe to drop on its own."""
     n = (name or "").lower()
     if _ACQ.search(n) or _ROMAN.search(name or ""):
         return True
-    if any(h in n for h in _NAME_HINTS):
+    if any(h in n for h in _STRONG_NAME):
         return True
-    if "6770" in (sic or "") or "blank" in (sic or "").lower():
+    return "6770" in (sic or "") or "blank" in (sic or "").lower()
+
+
+def is_spac_weak(name: str, text: str = "") -> bool:
+    """Lower-confidence SPAC tells; only act on these with no-operations rescue."""
+    n = (name or "").lower()
+    if any(h in n for h in _WEAK_NAME):
         return True
     t = (text or "").lower()
     return any(p in t for p in _BLANK_CHECK_TEXT)
+
+
+def is_spac(name: str, text: str = "", sic: str = "") -> bool:
+    return is_spac_strong(name, sic) or is_spac_weak(name, text)
 
 
 def is_fund(name: str) -> bool:
