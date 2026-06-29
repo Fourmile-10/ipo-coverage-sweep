@@ -158,6 +158,16 @@ def build_section_a(window_start: date, window_end: date, log: RunLog) -> Priced
     # calendar feed missed entirely.
     kept.extend(_crosscheck_424b4(window_start, window_end, seen_ciks, log))
 
+    # Lead with the most relevant names: largest first (implied valuation, else
+    # market cap, else raise). A large tech/industrial IPO outranks a tiny
+    # pre-revenue deal for a long-only quality investor.
+    def _size_key(ipo: sa.PricedIPO) -> float:
+        p = ipo.profile
+        return max(getattr(p, "impl_valuation", 0) or 0,
+                   ipo.market_cap or 0,
+                   getattr(p, "gross_proceeds", 0) or 0)
+    kept.sort(key=_size_key, reverse=True)
+
     if config.WEB_ENRICH:
         log.counts["priced_web_enriched"] = sum(
             1 for i in kept if getattr(i.profile, "external_color", ""))

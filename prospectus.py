@@ -182,6 +182,33 @@ def _section(text: str, start_patterns: tuple[str, ...], span: int = 9000) -> st
 
 # --- Field extractors ------------------------------------------------------
 _SENT = re.compile(r"(?<=[.!?])\s+")
+# Abbreviations whose trailing period is not a sentence end (avoid splitting
+# "Deep Fission, Inc." away from the rest of its sentence).
+_ABBR_END = re.compile(r"\b(?:Inc|Ltd|Corp|Co|L\.P|S\.A|N\.V|plc|U\.S|No|Mr|Ms|Dr|Mrs)\.$", re.I)
+# Parentheticals that contain a quote: legal defined terms ("X," the "Company,"
+# "we," "us") and abbreviation tags ("SMR"). Stripped so the prose reads normally.
+_QUOTE_PAREN = re.compile(r'\s*\([^()]*["“”‘’][^()]*\)')
+
+
+def _split_sentences(text: str) -> list[str]:
+    out: list[str] = []
+    for s in _SENT.split(text):
+        if out and _ABBR_END.search(out[-1].rstrip()):
+            out[-1] = out[-1].rstrip() + " " + s
+        else:
+            out.append(s)
+    return out
+
+
+def _clean_desc(s: str) -> str:
+    """Make extracted prose read like a normal summary: drop quote-parentheticals
+    (defined terms / abbreviation tags) and tidy spacing."""
+    s = _QUOTE_PAREN.sub("", s)
+    s = re.sub(r"\s+([,.;:])", r"\1", s)        # no space before punctuation
+    s = re.sub(r"\(\s*\)", "", s)               # empty parens left behind
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    s = re.sub(r"^[\s(,\-]+", "", s)            # strip leading junk
+    return (s[0].upper() + s[1:]) if s else s
 
 
 _BOILERPLATE = re.compile(
@@ -203,14 +230,14 @@ _BOILERPLATE = re.compile(
 
 def _collect_sentences(start: str) -> str:
     out = []
-    for s in _SENT.split(start):
+    for s in _split_sentences(start):
         s = s.strip()
         if len(s) < 25 or _BOILERPLATE.search(s):
             continue
         out.append(s)
         if len(out) >= 4 or sum(len(x) for x in out) > 460:
             break
-    return " ".join(out).strip()
+    return _clean_desc(" ".join(out).strip())
 
 
 _LEGAL_TAIL = re.compile(r"[,\s]+(?:Inc\.?|LLC|L\.?P\.?|PLC|plc|Ltd\.?|Limited|"
@@ -254,7 +281,7 @@ def extract_business(name: str, flat: str) -> str:
     #    company name ("Deep Fission, Inc."), so scan the first few sentences for
     #    the real description lead and collect from there.
     for m in re.finditer(r"\bOverview\b\s+", front):
-        sents = _SENT.split(front[m.end(): m.end() + 1600])
+        sents = _split_sentences(front[m.end(): m.end() + 1600])
         for i, s in enumerate(sents[:4]):
             if _is_desc_lead(s, stem):
                 res = _collect_sentences(" ".join(sents[i:]))
@@ -660,7 +687,7 @@ def filer_detail(cik: str, filename: str, form: str, foreign: bool, name: str,
     out["revenue"] = _fin_revenue_label(extract_financials(flat, foreign or form.startswith("F-"), fy_max))
     biz = extract_business(name, flat)
     if biz:
-        first = re.split(r"(?<=[.!?])\s+", biz)[0]
+        first = _split_sentences(biz)[0]
         out["business"] = (first[:155].rstrip() + "...") if len(first) > 158 else first
     return out
 
