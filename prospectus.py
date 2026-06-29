@@ -59,7 +59,6 @@ class Profile:
     cfo_name: str = ""
     founders: list[str] = field(default_factory=list)
     employees: str = ""
-    use_of_proceeds: str = ""
     external_color: str = ""   # optional web-search context (tagged external)
     # financials
     revenue: float | None = None
@@ -428,17 +427,6 @@ def extract_offering(text: str, price: float | None) -> dict:
     return out
 
 
-def extract_use_of_proceeds(text: str) -> str:
-    sect = _section(text, (r"use of proceeds",), span=2500)
-    if not sect:
-        return ""
-    m = re.search(r"(?:we intend to use|intend to use|to use the net proceeds|for)\s+([^.]{20,200}\.)", sect, re.I)
-    if m:
-        return re.sub(r"\s+", " ", m.group(1)).strip()
-    sents = [s.strip() for s in _SENT.split(sect) if len(s.strip()) > 30]
-    return sents[0][:200] if sents else ""
-
-
 _SCALE = {"thousand": 1e3, "thousands": 1e3, "million": 1e6, "millions": 1e6,
           "billion": 1e9, "billions": 1e9}
 
@@ -677,7 +665,6 @@ def build_profile(ticker: str, name: str, price: float | None,
     p.ceo_tenure = lead["tenure"]
     p.ceo_prior = lead["prior"]
     p.employees = extract_employees(flat)
-    p.use_of_proceeds = extract_use_of_proceeds(flat)
 
     fin = extract_financials(flat, p.foreign, fy_max)
     p.revenue = fin["revenue"]

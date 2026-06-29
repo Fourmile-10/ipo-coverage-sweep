@@ -149,8 +149,6 @@ def render_pdf(path: str, start: date, end: date, priced, filed,
                 Paragraph(_e(c["business"]), st["bodyj"]),
                 Paragraph(f'<b><font color="#0E4640">Leadership.</font></b> '
                           f'{_e(c["leadership"])}', st["bodyj"]),
-                Paragraph(f'<b><font color="#0E4640">Use of proceeds.</font></b> '
-                          f'{_e(c["use_of_proceeds"])}', st["bodyj"]),
             ]
             if c.get("external"):
                 left.append(Paragraph(f'<b><font color="#0E4640">Context.</font></b> '

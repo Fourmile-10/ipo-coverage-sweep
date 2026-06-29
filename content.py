@@ -19,6 +19,20 @@ def window_str(start: date, end: date) -> str:
     return f"{start.strftime('%d %b %Y')} to {end.strftime('%d %b %Y')}"
 
 
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def pretty_date(iso: str) -> str:
+    """'2026-06-26' -> '26th June'."""
+    try:
+        d = date.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return iso or "n/d"
+    return f"{_ordinal(d.day)} {d.strftime('%B')}"
+
+
 NOT_DISCLOSED = "not disclosed in prospectus"
 
 
@@ -85,7 +99,7 @@ def deal_stats(ipo: sa.PricedIPO) -> list[tuple[str, str]]:
     """Right-panel 'Deal' rows."""
     p = ipo.profile
     rows = [
-        ("Priced", ipo.ipo_date or "n/d"),
+        ("Priced", pretty_date(ipo.ipo_date) if ipo.ipo_date else "n/d"),
         ("Offer price", _price_s(ipo)),
         ("Raise", _m(p and p.gross_proceeds)),
         ("Impl. valuation", _m(p and p.impl_valuation)),
@@ -180,7 +194,6 @@ def priced_card(ipo: sa.PricedIPO) -> dict:
         "business": (p.business if (p and p.business) else NOT_DISCLOSED),
         "leadership": _leadership_line(p),
         "financials": _financials_line(p),
-        "use_of_proceeds": (p.use_of_proceeds if (p and p.use_of_proceeds) else NOT_DISCLOSED),
         "external": (p.external_color if (p and p.external_color) else ""),
         "source": src,
     }
@@ -194,7 +207,7 @@ def summary_row(ipo: sa.PricedIPO) -> list[str]:
     p = ipo.profile
     return [
         f"{short_name(ipo.name)} ({ipo.ticker})",
-        ipo.ipo_date,
+        pretty_date(ipo.ipo_date),
         _price_s(ipo),
         _m(p and p.gross_proceeds),
         _m(p and p.impl_valuation),
@@ -206,7 +219,7 @@ def summary_row(ipo: sa.PricedIPO) -> list[str]:
 def filer_row(f: Filer) -> list[str]:
     return [
         f.company,
-        f.date_filed,
+        pretty_date(f.date_filed),
         f.country or ("foreign" if f.foreign else "US"),
         f.business or "not disclosed",
         f.revenue_label,
@@ -290,10 +303,10 @@ def slack_section_b_standouts(filed: FiledResult) -> str:
     parts = []
     if filed.domestic:
         parts.append("*Newly filed, domestic (S-1):* "
-                     + ", ".join(f"{f.company} ({f.date_filed})" for f in filed.domestic[:8]))
+                     + ", ".join(f"{f.company} ({pretty_date(f.date_filed)})" for f in filed.domestic[:8]))
     if filed.foreign:
         parts.append("*Newly filed, foreign (F-1):* "
-                     + ", ".join(f"{f.company} ({f.date_filed})" for f in filed.foreign[:8]))
+                     + ", ".join(f"{f.company} ({pretty_date(f.date_filed)})" for f in filed.foreign[:8]))
     if not parts:
         parts.append("Section B: no new S-1/F-1 filings this window.")
     return "\n".join(parts)
@@ -307,7 +320,6 @@ def profile_text(ipo: sa.PricedIPO) -> str:
         f"  What it does: {c['business']}",
         f"  Leadership: {c['leadership']}",
         f"  Financials: {c['financials']}",
-        f"  Use of proceeds: {c['use_of_proceeds']}",
     ]
     if c.get("external"):
         lines.append(f"  Context (external): {c['external']}")
@@ -319,7 +331,7 @@ def section_b_text(filed: FiledResult) -> str:
     def block(title, filers):
         if not filers:
             return f"*{title}:* none this window."
-        rows = [f"  - {f.company} | filed {f.date_filed} | "
+        rows = [f"  - {f.company} | filed {pretty_date(f.date_filed)} | "
                 f"{f.country or ('foreign' if f.foreign else 'US')} | "
                 f"{f.business or 'not disclosed'} | rev {f.revenue_label}" for f in filers]
         return f"*{title}:*\n" + "\n".join(rows)
