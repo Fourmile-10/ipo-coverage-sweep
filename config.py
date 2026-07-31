@@ -14,7 +14,10 @@ load_dotenv()  # no-op in CI where env vars come from GitHub Actions secrets
 
 # --- Secrets / environment -------------------------------------------------
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
-SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "")
+# Target channel. Defaults to #ipos-spacs-things; override via the SLACK_CHANNEL_ID
+# env var / repo variable, or a per-run --channel flag. Code-controlled so a stale
+# secret cannot silently send the sweep to the wrong channel.
+SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID") or "C01R4V0ESDT"
 # SEC requires a descriptive UA with contact info on every request.
 SEC_USER_AGENT = os.environ.get(
     "SEC_USER_AGENT", "Decade Partners Research glenn@decadepartners.com.au"

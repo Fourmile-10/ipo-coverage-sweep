@@ -98,10 +98,12 @@ secrets stored there.
    **Actions**:
    - **Secrets** tab → **New repository secret**, add:
      - `SLACK_BOT_TOKEN`
-     - `SLACK_CHANNEL_ID`
      - `SEC_USER_AGENT` = `Decade Partners Research glenn@decadepartners.com.au`
    - **Variables** tab → **New repository variable**, add:
      - `BIWEEKLY_PARITY` = `0` (see Step 5 to pick the right fortnight)
+     - `SLACK_CHANNEL_ID` is **optional** — the code defaults to
+       #ipos-spacs-things (`C01R4V0ESDT`). Add it as a repo *variable* only to
+       post somewhere else. (The bot must be invited to whichever channel.)
 
 That is it. The workflow file (`.github/workflows/biweekly.yml`) is already in
 the repo and turns on automatically.

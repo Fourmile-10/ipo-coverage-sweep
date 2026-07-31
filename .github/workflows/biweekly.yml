@@ -35,7 +35,10 @@ jobs:
       - name: Run IPO sweep
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          # Channel is code-controlled (config.py default = #ipos-spacs-things).
+          # Set the repo variable SLACK_CHANNEL_ID only to override it; the old
+          # secret is intentionally not used here.
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           SHAREPOINT_DEST: ${{ secrets.SHAREPOINT_DEST }}
           BIWEEKLY_PARITY: ${{ vars.BIWEEKLY_PARITY }}
